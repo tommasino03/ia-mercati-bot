@@ -12,16 +12,16 @@ def market_regime():
     sp = yf.download("SPY", period="6mo", interval="1d", progress=False)
     nd = yf.download("QQQ", period="6mo", interval="1d", progress=False)
 
-    # Controllo se i dati sono sufficienti
+    # Controllo dati sufficienti
     if sp.empty or nd.empty or len(sp) < 50 or len(nd) < 50:
         return "NEUTRO"
 
-    # Prendi singolo valore float
-    sp_last = float(sp["Close"].iloc[-1])
-    nd_last = float(nd["Close"].iloc[-1])
+    # Prendi singoli float sicuri
+    sp_last = sp["Close"].iloc[-1].item()
+    nd_last = nd["Close"].iloc[-1].item()
 
-    sp_ma50 = float(sp["Close"].iloc[-50:].mean())
-    nd_ma50 = float(nd["Close"].iloc[-50:].mean())
+    sp_ma50 = sp["Close"].iloc[-50:].mean().item()
+    nd_ma50 = nd["Close"].iloc[-50:].mean().item()
 
     if sp_last > sp_ma50 and nd_last > nd_ma50:
         return "🟢 RISK-ON"
@@ -52,10 +52,10 @@ for t, name in assets.items():
         continue
 
     close = data["Close"].values
-    last = float(close[-1])
-    ma20 = float(close[-20:].mean())
-    ma50 = float(close[-50:].mean())
-    max20 = float(max(close[-20:]))
+    last = close[-1].item() if hasattr(close[-1], "item") else float(close[-1])
+    ma20 = data["Close"].iloc[-20:].mean().item()
+    ma50 = data["Close"].iloc[-50:].mean().item()
+    max20 = data["Close"].iloc[-20:].max().item()
 
     score = 0
     if last > ma20: score += 2
