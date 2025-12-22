@@ -7,22 +7,46 @@ CHAT_ID = "595821281"
 CAPITALE = 200
 INVESTIMENTO_PER_TRADE = 20
 
+# ===== REGIME DI MERCATO =====
+def market_regime():
+    sp = yf.download("SPY", period="6mo", interval="1d", progress=False)
+    nd = yf.download("QQQ", period="6mo", interval="1d", progress=False)
+
+    if len(sp) < 50 or len(nd) < 50:
+        return "NEUTRO"
+
+    sp_last = sp["Close"].iloc[-1]
+    nd_last = nd["Close"].iloc[-1]
+
+    sp_ma50 = sp["Close"].iloc[-50:].mean()
+    nd_ma50 = nd["Close"].iloc[-50:].mean()
+
+    if sp_last > sp_ma50 and nd_last > nd_ma50:
+        return "🟢 RISK-ON"
+    elif sp_last < sp_ma50 and nd_last < nd_ma50:
+        return "🔴 RISK-OFF"
+    else:
+        return "🟡 NEUTRO"
+
+REGIME = market_regime()
+
+# ===== ASSET =====
 assets = {
-    "AAPL": "Apple (azione)",
-    "MSFT": "Microsoft (azione)",
-    "NVDA": "Nvidia (azione)",
-    "SPY": "S&P500 (ETF)",
-    "QQQ": "Nasdaq (ETF)",
-    "BTC-USD": "Bitcoin (crypto)",
-    "ETH-USD": "Ethereum (crypto)"
+    "AAPL": "Apple",
+    "MSFT": "Microsoft",
+    "NVDA": "Nvidia",
+    "SPY": "S&P500",
+    "QQQ": "Nasdaq",
+    "BTC-USD": "Bitcoin",
+    "ETH-USD": "Ethereum"
 }
 
-msg = "🤖 IA MERCATI – SEGNALI OPERATIVI\n"
-msg += f"Capitale test: {CAPITALE} €\n\n"
+msg = "🤖 IA MERCATI – REGIME & SEGNALI\n"
+msg += f"Regime mercato: {REGIME}\n\n"
 
 for t, name in assets.items():
     data = yf.download(t, period="6mo", interval="1d", progress=False)
-    if data is None or len(data) < 50:
+    if len(data) < 50:
         continue
 
     close = data["Close"].values
@@ -32,30 +56,18 @@ for t, name in assets.items():
     max20 = max(close[-20:])
 
     score = 0
-    reasons = []
+    if last > ma20: score += 2
+    if last > ma50: score += 3
+    if last >= max20: score += 2
 
-    if last > ma20:
-        score += 2
-        reasons.append("sopra media 20g")
-    if last > ma50:
-        score += 3
-        reasons.append("trend positivo")
-    if last >= max20:
-        score += 2
-        reasons.append("massimi recenti")
-
-    if score >= 5:
-        action = "✅ COMPRA"
-        size = f"{INVESTIMENTO_PER_TRADE} €"
-    else:
-        action = "⏳ ATTENDI"
+    if REGIME == "🔴 RISK-OFF":
+        action = "⛔ BLOCCATO"
         size = "-"
+    else:
+        action = "✅ COMPRA" if score >= 5 else "⏳ ATTENDI"
+        size = f"{INVESTIMENTO_PER_TRADE} €" if action == "✅ COMPRA" else "-"
 
-    msg += f"🔹 {name}\n"
-    msg += f"Score: {score}\n"
-    msg += f"Azione: {action}\n"
-    msg += f"Importo: {size}\n"
-    msg += f"Motivo: {', '.join(reasons) if reasons else 'debole'}\n\n"
+    msg += f"{name}\nScore: {score}\nAzione: {action}\nImporto: {size}\n\n"
 
 url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
