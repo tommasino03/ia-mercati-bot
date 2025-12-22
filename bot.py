@@ -13,11 +13,9 @@ def market_regime():
     sp = yf.download("SPY", period="6mo", interval="1d", progress=False)
     nd = yf.download("QQQ", period="6mo", interval="1d", progress=False)
 
-    # Controllo dati sufficienti
     if sp.empty or nd.empty or len(sp) < 50 or len(nd) < 50:
         return "NEUTRO"
 
-    # Prendi singoli float sicuri
     sp_last = sp["Close"].iloc[-1].item()
     nd_last = nd["Close"].iloc[-1].item()
 
@@ -58,7 +56,6 @@ for t, name in assets.items():
     ma50 = data["Close"].iloc[-50:].mean().item()
     max20 = data["Close"].iloc[-20:].max().item()
 
-    # ===== SCORE BASE =====
     score = 0
     if last > ma20: score += 2
     if last > ma50: score += 3
@@ -67,7 +64,7 @@ for t, name in assets.items():
     # ===== FILTRO SMART MONEY =====
     vol = data["Volume"].iloc[-5:].mean()
     vol50 = data["Volume"].iloc[-50:].mean()
-    smart_money = vol > vol50  # True se volume recente > volume medio a lungo termine
+    smart_money = bool(vol > vol50)  # <<< converti in singolo True/False
 
     # ===== DECISIONE FINALE =====
     if REGIME == "🔴 RISK-OFF":
@@ -86,6 +83,6 @@ for t, name in assets.items():
 
     msg += f"{name}\nScore: {score}\nAzione: {action}\nImporto: {size}\n\n"
 
-# ===== INVIO MESSAGGIO SU TELEGRAM =====
+# ===== INVIO SU TELEGRAM =====
 url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
