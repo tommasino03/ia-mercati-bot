@@ -47,9 +47,9 @@ msg += f"Regime mercato: {REGIME}\n\n"
 for t, name in assets.items():
     data = yf.download(t, period="6mo", interval="1d", progress=False)
     if data.empty or len(data) < 50:
+        msg += f"{name}\nDati insufficienti\n\n"
         continue
 
-    # ===== PRENDI I VALORI DIRETTAMENTE DALLA SERIES =====
     last = float(data["Close"].iloc[-1])
     ma20 = float(data["Close"].iloc[-20:].mean())
     ma50 = float(data["Close"].iloc[-50:].mean())
@@ -63,7 +63,7 @@ for t, name in assets.items():
     # ===== FILTRO SMART MONEY =====
     vol = float(data["Volume"].iloc[-5:].mean())
     vol50 = float(data["Volume"].iloc[-50:].mean())
-    smart_money = vol > vol50  # singolo True/False
+    smart_money = vol > vol50  # True/False
 
     # ===== DECISIONE FINALE =====
     if REGIME == "🔴 RISK-OFF":
@@ -80,7 +80,16 @@ for t, name in assets.items():
             action = "⏳ ATTENDI"
             size = "-"
 
-    msg += f"{name}\nScore: {score}\nAzione: {action}\nImporto: {size}\n\n"
+    # Mostriamo TUTTI gli asset
+    msg += (
+        f"{name}\n"
+        f"Score: {score}\n"
+        f"Azione: {action}\n"
+        f"Importo: {size}\n"
+        f"Ultimo prezzo: {last:.2f} €\n"
+        f"Media 20gg: {ma20:.2f} | Media 50gg: {ma50:.2f}\n"
+        f"Max ultimi 20gg: {max20:.2f}\n\n"
+    )
 
 # ===== INVIO SU TELEGRAM =====
 url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
