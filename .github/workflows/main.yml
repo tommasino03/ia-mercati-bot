@@ -1,0 +1,18 @@
+name: IA Mercati Bot
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: pip install yfinance requests
+
+      - name: Run bot
+        run: python bot.py
