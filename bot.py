@@ -49,8 +49,8 @@ for t, name in assets.items():
     if data.empty or len(data) < 50:
         continue
 
-    close = data["Close"].values
-    last = float(close[-1])
+    # ===== PRENDI I VALORI DIRETTAMENTE DALLA SERIES =====
+    last = float(data["Close"].iloc[-1])
     ma20 = float(data["Close"].iloc[-20:].mean())
     ma50 = float(data["Close"].iloc[-50:].mean())
     max20 = float(data["Close"].iloc[-20:].max())
@@ -63,7 +63,7 @@ for t, name in assets.items():
     # ===== FILTRO SMART MONEY =====
     vol = float(data["Volume"].iloc[-5:].mean())
     vol50 = float(data["Volume"].iloc[-50:].mean())
-    smart_money = vol > vol50  # ora è sempre un singolo True/False
+    smart_money = vol > vol50  # singolo True/False
 
     # ===== DECISIONE FINALE =====
     if REGIME == "🔴 RISK-OFF":
