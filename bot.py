@@ -1,8 +1,8 @@
 import yfinance as yf
 import requests
 
-TOKEN = "8268985960:AAHqyZ679C4B4y7ICq96xQy5JU9PJ_1KiZg"
-CHAT_ID = "595821281"
+TOKEN = "INCOLLA_IL_TOKEN"
+CHAT_ID = "INCOLLA_IL_CHAT_ID"
 
 CAPITALE = 200
 INVESTIMENTO_PER_TRADE = 20
@@ -12,14 +12,16 @@ def market_regime():
     sp = yf.download("SPY", period="6mo", interval="1d", progress=False)
     nd = yf.download("QQQ", period="6mo", interval="1d", progress=False)
 
-    if len(sp) < 50 or len(nd) < 50:
+    # Controllo se i dati sono sufficienti
+    if sp.empty or nd.empty or len(sp) < 50 or len(nd) < 50:
         return "NEUTRO"
 
-    sp_last = sp["Close"].iloc[-1]  # singolo valore
-    nd_last = nd["Close"].iloc[-1]
+    # Prendi singolo valore float
+    sp_last = float(sp["Close"].iloc[-1])
+    nd_last = float(nd["Close"].iloc[-1])
 
-    sp_ma50 = sp["Close"].iloc[-50:].mean()  # singolo valore
-    nd_ma50 = nd["Close"].iloc[-50:].mean()
+    sp_ma50 = float(sp["Close"].iloc[-50:].mean())
+    nd_ma50 = float(nd["Close"].iloc[-50:].mean())
 
     if sp_last > sp_ma50 and nd_last > nd_ma50:
         return "🟢 RISK-ON"
@@ -46,14 +48,14 @@ msg += f"Regime mercato: {REGIME}\n\n"
 
 for t, name in assets.items():
     data = yf.download(t, period="6mo", interval="1d", progress=False)
-    if len(data) < 50:
+    if data.empty or len(data) < 50:
         continue
 
     close = data["Close"].values
-    last = close[-1]
-    ma20 = close[-20:].mean()
-    ma50 = close[-50:].mean()
-    max20 = max(close[-20:])
+    last = float(close[-1])
+    ma20 = float(close[-20:].mean())
+    ma50 = float(close[-50:].mean())
+    max20 = float(max(close[-20:]))
 
     score = 0
     if last > ma20: score += 2
