@@ -1,0 +1,25 @@
+name: IA Mercati Bot
+
+on:
+  schedule:
+    - cron: "0 8 * * *"  # ogni giorno alle 9:00 ora italiana (in inverno)
+  workflow_dispatch:  # permette di far partire il bot manualmente
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configura Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.12
+
+      - name: Installa dipendenze
+        run: |
+          python -m pip install --upgrade pip
+          pip install yfinance requests pandas
+
+      - name: Esegui bot
+        run: python bot.py
