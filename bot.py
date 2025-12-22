@@ -15,10 +15,10 @@ def market_regime():
     if len(sp) < 50 or len(nd) < 50:
         return "NEUTRO"
 
-    sp_last = sp["Close"].iloc[-1]
+    sp_last = sp["Close"].iloc[-1]  # singolo valore
     nd_last = nd["Close"].iloc[-1]
 
-    sp_ma50 = sp["Close"].iloc[-50:].mean()
+    sp_ma50 = sp["Close"].iloc[-50:].mean()  # singolo valore
     nd_ma50 = nd["Close"].iloc[-50:].mean()
 
     if sp_last > sp_ma50 and nd_last > nd_ma50:
