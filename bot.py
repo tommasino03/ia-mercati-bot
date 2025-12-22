@@ -16,11 +16,10 @@ def market_regime():
     if sp.empty or nd.empty or len(sp) < 50 or len(nd) < 50:
         return "NEUTRO"
 
-    sp_last = sp["Close"].iloc[-1].item()
-    nd_last = nd["Close"].iloc[-1].item()
-
-    sp_ma50 = sp["Close"].iloc[-50:].mean().item()
-    nd_ma50 = nd["Close"].iloc[-50:].mean().item()
+    sp_last = float(sp["Close"].iloc[-1])
+    nd_last = float(nd["Close"].iloc[-1])
+    sp_ma50 = float(sp["Close"].iloc[-50:].mean())
+    nd_ma50 = float(nd["Close"].iloc[-50:].mean())
 
     if sp_last > sp_ma50 and nd_last > nd_ma50:
         return "🟢 RISK-ON"
@@ -51,10 +50,10 @@ for t, name in assets.items():
         continue
 
     close = data["Close"].values
-    last = close[-1].item() if hasattr(close[-1], "item") else float(close[-1])
-    ma20 = data["Close"].iloc[-20:].mean().item()
-    ma50 = data["Close"].iloc[-50:].mean().item()
-    max20 = data["Close"].iloc[-20:].max().item()
+    last = float(close[-1])
+    ma20 = float(data["Close"].iloc[-20:].mean())
+    ma50 = float(data["Close"].iloc[-50:].mean())
+    max20 = float(data["Close"].iloc[-20:].max())
 
     score = 0
     if last > ma20: score += 2
@@ -62,9 +61,9 @@ for t, name in assets.items():
     if last >= max20: score += 2
 
     # ===== FILTRO SMART MONEY =====
-    vol = data["Volume"].iloc[-5:].mean()
-    vol50 = data["Volume"].iloc[-50:].mean()
-    smart_money = bool(vol > vol50)  # <<< converti in singolo True/False
+    vol = float(data["Volume"].iloc[-5:].mean())
+    vol50 = float(data["Volume"].iloc[-50:].mean())
+    smart_money = vol > vol50  # ora è sempre un singolo True/False
 
     # ===== DECISIONE FINALE =====
     if REGIME == "🔴 RISK-OFF":
