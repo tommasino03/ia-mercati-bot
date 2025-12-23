@@ -4,8 +4,8 @@ import requests
 from datetime import datetime
 
 # --- CONFIGURAZIONE BOT TELEGRAM ---
-TOKEN = "8268985960:AAHqyZ679C4B4y7ICq96xQy5JU9PJ_1KiZg"
-CHAT_ID = "595821281"
+TOKEN = "8268985960:AAHqyZ679C4B4y7ICq96xQy5JU9PJ_1KiZg"  # metti il token del tuo bot
+CHAT_ID = "595821281"  # metti il tuo chat id
 
 # Lista degli asset da analizzare
 ASSET = {
@@ -20,9 +20,11 @@ def analizza_asset(ticker):
     if data.empty:
         return None
     close = data["Close"]
-    ma20 = close.rolling(window=20).mean().iloc[-1]
-    ma50 = close.rolling(window=50).mean().iloc[-1]
-    last = close.iloc[-1]
+    
+    # Media degli ultimi 20 e 50 giorni
+    ma20 = float(close.rolling(window=20).mean().iloc[-1])
+    ma50 = float(close.rolling(window=50).mean().iloc[-1])
+    last = float(close.iloc[-1])
 
     # Segnali brevi, medi, lunghi
     breve = "⚠️ neutro"
