@@ -1,0 +1,23 @@
+{
+  "generated_at": "2025-01-01 09:00",
+  "signals": [
+    {
+      "asset": "NASDAQ",
+      "score": 6,
+      "action": "COMPRA",
+      "amount": 200
+    },
+    {
+      "asset": "SP500",
+      "score": 5,
+      "action": "COMPRA",
+      "amount": 200
+    },
+    {
+      "asset": "NVIDIA",
+      "score": 2,
+      "action": "ATTENDI",
+      "amount": 0
+    }
+  ]
+}
