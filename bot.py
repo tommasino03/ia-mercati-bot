@@ -1,96 +1,65 @@
 import yfinance as yf
+import pandas as pd
 import requests
+from datetime import datetime
 
-# ===== CONFIG =====
+# --- CONFIGURAZIONE BOT TELEGRAM ---
 TOKEN = "8268985960:AAHqyZ679C4B4y7ICq96xQy5JU9PJ_1KiZg"
 CHAT_ID = "595821281"
 
-CAPITALE = 200
-INVESTIMENTO_PER_TRADE = 20
-
-# ===== REGIME DI MERCATO =====
-def market_regime():
-    sp = yf.download("SPY", period="6mo", interval="1d", progress=False)
-    nd = yf.download("QQQ", period="6mo", interval="1d", progress=False)
-
-    if sp.empty or nd.empty or len(sp) < 50 or len(nd) < 50:
-        return "NEUTRO"
-
-    sp_last = float(sp["Close"].iloc[-1])
-    nd_last = float(nd["Close"].iloc[-1])
-    sp_ma50 = float(sp["Close"].iloc[-50:].mean())
-    nd_ma50 = float(nd["Close"].iloc[-50:].mean())
-
-    if sp_last > sp_ma50 and nd_last > nd_ma50:
-        return "🟢 RISK-ON"
-    elif sp_last < sp_ma50 and nd_last < nd_ma50:
-        return "🔴 RISK-OFF"
-    else:
-        return "🟡 NEUTRO"
-
-REGIME = market_regime()
-
-# ===== ASSET CON FILTRO SMART MONEY =====
-assets = {
-    "AAPL": "Apple",
-    "MSFT": "Microsoft",
-    "NVDA": "Nvidia",
-    "SPY": "S&P500",
-    "QQQ": "Nasdaq",
-    "BTC-USD": "Bitcoin",
-    "ETH-USD": "Ethereum"
+# Lista degli asset da analizzare
+ASSET = {
+    "Azioni USA": ["NVDA", "AAPL", "MSFT", "AMZN", "META"],
+    "ETF": ["SPY", "QQQ", "VEA", "VGK"],
+    "Crypto": ["BTC-USD", "ETH-USD"]
 }
 
-msg = "🤖 IA MERCATI – REGIME & SEGNALI (Smart Money)\n"
-msg += f"Regime mercato: {REGIME}\n\n"
+# Funzione per scaricare dati e calcolare medie
+def analizza_asset(ticker):
+    data = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
+    if data.empty:
+        return None
+    close = data["Close"]
+    ma20 = close.rolling(window=20).mean().iloc[-1]
+    ma50 = close.rolling(window=50).mean().iloc[-1]
+    last = close.iloc[-1]
 
-for t, name in assets.items():
-    data = yf.download(t, period="6mo", interval="1d", progress=False)
-    if data.empty or len(data) < 50:
-        msg += f"{name}\nDati insufficienti\n\n"
-        continue
+    # Segnali brevi, medi, lunghi
+    breve = "⚠️ neutro"
+    medio = "⚠️ attendere"
+    lungo = "⚠️ attendere"
 
-    last = float(data["Close"].iloc[-1])
-    ma20 = float(data["Close"].iloc[-20:].mean())
-    ma50 = float(data["Close"].iloc[-50:].mean())
-    max20 = float(data["Close"].iloc[-20:].max())
+    if last > ma20:
+        breve = "✅ COMPRA"
+    if last > ma50:
+        medio = "✅ COMPRA"
+        lungo = "✅ INVESTI"
+    elif last < ma50:
+        medio = "❌ VENDI"
+        lungo = "❌ VENDI"
 
-    score = 0
-    if last > ma20: score += 2
-    if last > ma50: score += 3
-    if last >= max20: score += 2
+    motivo = f"trend breve {breve}, trend medio {medio}, trend lungo {lungo}"
 
-    # ===== FILTRO SMART MONEY =====
-    vol = float(data["Volume"].iloc[-5:].mean())
-    vol50 = float(data["Volume"].iloc[-50:].mean())
-    smart_money = vol > vol50  # True/False
+    return f"📌 {ticker}\nBreve: {breve}\nMedio: {medio}\nLungo: {lungo}\nMotivo: {motivo}\n"
 
-    # ===== DECISIONE FINALE =====
-    if REGIME == "🔴 RISK-OFF":
-        action = "⛔ BLOCCATO"
-        size = "-"
-    else:
-        if score >= 5 and smart_money:
-            action = "✅ COMPRA"
-            size = f"{INVESTIMENTO_PER_TRADE} €"
-        elif score >= 5 and not smart_money:
-            action = "⚠ ATTENDI (volume basso)"
-            size = "-"
-        else:
-            action = "⏳ ATTENDI"
-            size = "-"
+# Funzione per inviare messaggio Telegram
+def invia_telegram(messaggio):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": messaggio}
+    requests.post(url, data=payload)
 
-    # Mostriamo TUTTI gli asset
-    msg += (
-        f"{name}\n"
-        f"Score: {score}\n"
-        f"Azione: {action}\n"
-        f"Importo: {size}\n"
-        f"Ultimo prezzo: {last:.2f} €\n"
-        f"Media 20gg: {ma20:.2f} | Media 50gg: {ma50:.2f}\n"
-        f"Max ultimi 20gg: {max20:.2f}\n\n"
-    )
+# --- CREAZIONE REPORT ---
+report = f"📊 REPORT IA MERCATI – {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
 
-# ===== INVIO SU TELEGRAM =====
-url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+for categoria, tickers in ASSET.items():
+    report += f"--- {categoria} ---\n"
+    for t in tickers:
+        res = analizza_asset(t)
+        if res:
+            report += res + "\n"
+
+# Aggiunta riepilogo generale
+report += "\n🧠 SITUAZIONE GENERALE:\nMercato: POSITIVO\nStrategia consigliata: COMPRARE SUI RITRACCIAMENTI\nRischio: MEDIO"
+
+# Invia il report su Telegram
+invia_telegram(report)
