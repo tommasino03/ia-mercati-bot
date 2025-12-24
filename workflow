@@ -20,15 +20,19 @@ jobs:
   "aggiornamento": "$TODAY",
   "segnali": [
    assets = [
+    assets = [
     {"nome": "NASDAQ", "ticker": "^IXIC"},
     {"nome": "SP500", "ticker": "^GSPC"},
     {"nome": "NVIDIA", "ticker": "NVDA"},
     {"nome": "TESLA", "ticker": "TSLA"},
     {"nome": "APPLE", "ticker": "AAPL"},
+    {"nome": "MICROSOFT", "ticker": "MSFT"},
     {"nome": "BTC", "ticker": "BTC-USD"},
     {"nome": "ETH", "ticker": "ETH-USD"},
-    {"nome": "CARDANO", "ticker": "ADA-USD"}
+    {"nome": "CARDANO", "ticker": "ADA-USD"},
+    {"nome": "SOLANA", "ticker": "SOL-USD"}
 ]
+
 
 }
 EOT
