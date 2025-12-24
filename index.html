@@ -5,10 +5,65 @@
 <meta charset="UTF-8">
 <title>Segnali Mercati</title>
 <style>
-body { font-family: Arial; background:#0f172a; color:white; padding:20px; }
-.card { background:#1e293b; padding:15px; margin:10px 0; border-radius:10px; }
-.buy { color:#22c55e; }
-.wait { color:#facc15; }
+body {
+  font-family: Arial, sans-serif;
+  background: #0f172a;
+  color: white;
+  padding: 20px;
+  margin: 0;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+#aggiornamento {
+  text-align: center;
+  margin-bottom: 30px;
+  font-size: 18px;
+}
+
+#container {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 20px;
+}
+
+.card {
+  background: #1e293b;
+  padding: 20px;
+  border-radius: 15px;
+  width: 220px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+  transition: transform 0.2s;
+}
+
+.card:hover {
+  transform: scale(1.05);
+}
+
+.card h2 {
+  margin-top: 0;
+  text-align: center;
+}
+
+.card p {
+  margin: 5px 0;
+  text-align: center;
+  font-size: 16px;
+}
+
+.buy {
+  color: #22c55e;
+  font-weight: bold;
+}
+
+.wait {
+  color: #facc15;
+  font-weight: bold;
+}
 </style>
 </head>
 <body>
@@ -54,3 +109,4 @@ fetch('signals.json')
 
 </body>
 </html>
+
