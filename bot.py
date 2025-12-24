@@ -4,8 +4,8 @@ from telegram import Bot
 from ia_mercati import calcola_segnali
 
 # --- CONFIGURAZIONE ---
-TOKEN = "IL_TUO_TOKEN_DEL_BOT"  # sostituisci con il token del tuo bot Telegram
-CHAT_ID = "IL_TUO_CHAT_ID"      # sostituisci con il tuo chat ID
+TOKEN = "8268985960:AAHqyZ679C4B4y7ICq96xQy5JU9PJ_1KiZg"  # sostituisci con il token del tuo bot Telegram
+CHAT_ID = "595821281"      # sostituisci con il tuo chat ID
 assets = ["AAPL", "SPY", "NVDA", "BTC-USD"]  # asset da monitorare
 
 # --- CREA OGGETTO BOT ---
