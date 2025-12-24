@@ -2,46 +2,52 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<title>📊 Report Segnali Mercati</title>
+<title>📊 Segnali Mercati</title>
 <style>
 body { font-family: Arial; background:#0f172a; color:white; padding:20px; }
-h1 { text-align:center; }
-.card { background:#1e293b; padding:20px; margin:15px 0; border-radius:12px; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
-.buy { color:#22c55e; font-weight:bold; font-size:1.1em; }
-.wait { color:#facc15; font-weight:bold; font-size:1.1em; }
-.score { font-size:1em; margin:5px 0; }
-.importo { margin:5px 0; }
+.card { background:#1e293b; padding:15px; margin:10px 0; border-radius:10px; }
+.buy { color:#22c55e; }
+.wait { color:#facc15; }
+.sell { color:#ef4444; }
 </style>
 </head>
 <body>
 
-<h1>📊 Report Segnali Mercati</h1>
-<p id="aggiornamento" style="text-align:center;">Aggiornamento: </p>
-<div id="container"></div>
+<h1>📊 Segnali Mercati</h1>
+<p>Aggiornamento: ore 09:00</p>
+
+<div id="contenitore-segnali">
+  <!-- Qui i segnali verranno inseriti dinamicamente -->
+</div>
 
 <script>
-fetch('signals.json')
-.then(response => response.json())
-.then(data => {
-  // Mostra ora/data aggiornamento
-  const oraAgg = data.aggiornamento ? data.aggiornamento : "Non disponibile";
-  document.getElementById('aggiornamento').textContent = "Aggiornamento: ore " + oraAgg;
+// Esempio di segnali (in futuro puoi generare un file signals_ia.json e leggerlo con fetch)
+const segnali = {
+    "NASDAQ": {score: 6, azione: "COMPRA", confidence: 1.0},
+    "SP500": {score: 5, azione: "COMPRA", confidence: 0.8},
+    "NVIDIA": {score: 2, azione: "ATTENDI", confidence: 0.4},
+    "BTC-USD": {score: 4, azione: "COMPRA", confidence: 0.7}
+};
 
-  const container = document.getElementById('container');
-  container.innerHTML = "";
+const container = document.getElementById("contenitore-segnali");
 
-  data.segnali.forEach(s => {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `
-      <h2>${s.nome}</h2>
-      <p class="score">Score: ${s.score}</p>
-      <p class="${s.azione === 'COMPRA' ? 'buy' : 'wait'}">Azione: ${s.azione}</p>
-      <p class="importo">Importo: ${s.importo} €</p>
+for (const [asset, info] of Object.entries(segnali)) {
+    const div = document.createElement("div");
+    div.className = "card";
+
+    let classeAzione = "";
+    if (info.azione === "COMPRA") classeAzione = "buy";
+    else if (info.azione === "ATTENDI") classeAzione = "wait";
+    else classeAzione = "sell";
+
+    div.innerHTML = `
+        <h2>${asset}</h2>
+        <p>Score: ${info.score}</p>
+        <p class="${classeAzione}">Azione: ${info.azione}</p>
+        <p>Confidence: ${Math.round(info.confidence * 100)}%</p>
     `;
-    container.appendChild(card);
-  });
-});
+    container.appendChild(div);
+}
 </script>
 
 </body>
