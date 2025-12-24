@@ -38,9 +38,18 @@ jobs:
 EOT
 
       - name: Salva modifiche
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          git add signals.json
-          git commit -m "Aggiornamento automatico signals.json"
-          git push
+           - name: Aggiorna signals.json dinamicamente
+      run: |
+        python3 - <<EOF
+        import json, random
+        data = {
+          "aggiornamento": "09:00",
+          "segnali": [
+            {"nome": "NASDAQ", "score": random.randint(0,6), "azione": random.choice(["COMPRA","ATTENDI"]), "importo": random.choice([0,50,100,200])},
+            {"nome": "SP500", "score": random.randint(0,6), "azione": random.choice(["COMPRA","ATTENDI"]), "importo": random.choice([0,50,100,200])},
+            {"nome": "NVIDIA", "score": random.randint(0,6), "azione": random.choice(["COMPRA","ATTENDI"]), "importo": random.choice([0,50,100,200])}
+          ]
+        }
+        with open("signals.json","w") as f:
+            json.dump(data,f)
+        EOF
