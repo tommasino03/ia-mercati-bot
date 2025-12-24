@@ -12,13 +12,13 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    - name: Aggiorna signals.json in modo realistico
+    - name: Aggiorna signals.json realistico con più asset
       run: |
         python3 - <<EOF
         import json, random
 
         def genera_segnale(nome):
-            # Genera uno score da 0 a 6
+            # Genera score casuale
             score = random.randint(0,6)
             # Logica realistica per azione e importo
             if score >= 4:
@@ -32,17 +32,16 @@ jobs:
                 importo = 0
             return {"nome": nome, "score": score, "azione": azione, "importo": importo}
 
-        # Lista degli asset
+        # Lista di tutti gli asset da monitorare
+        asset_list = ["NASDAQ", "SP500", "NVIDIA", "TESLA", "ETH-USD", "BTC-USD"]
+
+        # Genera i segnali per tutti gli asset
         data = {
           "aggiornamento": "09:00",
-          "segnali": [
-            genera_segnale("NASDAQ"),
-            genera_segnale("SP500"),
-            genera_segnale("NVIDIA")
-          ]
+          "segnali": [genera_segnale(nome) for nome in asset_list]
         }
 
-        # Scrive i dati in signals.json
+        # Scrive il file signals.json
         with open("signals.json","w") as f:
             json.dump(data,f)
         EOF
@@ -52,5 +51,5 @@ jobs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "GitHub Actions"
         git add signals.json
-        git commit -m "Aggiornamento automatico segnali realistici"
+        git commit -m "Aggiornamento automatico segnali realistici con più asset"
         git push
