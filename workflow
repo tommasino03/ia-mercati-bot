@@ -1,55 +1,56 @@
-name: Aggiorna signals.json
+name: Aggiorna segnali ogni giorno
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # ogni giorno alle 9:00 UTC
-  workflow_dispatch:  # permette anche di far partire manualmente
+    - cron: '0 9 * * *' # ogni giorno alle 09:00 UTC
+  workflow_dispatch:
 
 jobs:
-  aggiorna:
+  update_signals:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Aggiorna signals.json
-        run: |
-          echo "Creiamo segnali di esempio"
-          TODAY=$(date +'%Y-%m-%d')
-          cat <<EOT > signals.json
-{
-  "aggiornamento": "$TODAY",
-  "segnali": [
-   assets = [
-    assets = [
-    {"nome": "NASDAQ", "ticker": "^IXIC"},
-    {"nome": "SP500", "ticker": "^GSPC"},
-    {"nome": "NVIDIA", "ticker": "NVDA"},
-    {"nome": "TESLA", "ticker": "TSLA"},
-    {"nome": "APPLE", "ticker": "AAPL"},
-    {"nome": "MICROSOFT", "ticker": "MSFT"},
-    {"nome": "BTC", "ticker": "BTC-USD"},
-    {"nome": "ETH", "ticker": "ETH-USD"},
-    {"nome": "CARDANO", "ticker": "ADA-USD"},
-    {"nome": "SOLANA", "ticker": "SOL-USD"}
-]
-
-
-}
-EOT
-
-      - name: Salva modifiche
-           - name: Aggiorna signals.json dinamicamente
+    - name: Aggiorna signals.json in modo realistico
       run: |
         python3 - <<EOF
         import json, random
+
+        def genera_segnale(nome):
+            # Genera uno score da 0 a 6
+            score = random.randint(0,6)
+            # Logica realistica per azione e importo
+            if score >= 4:
+                azione = "COMPRA"
+                importo = random.choice([100,200])
+            elif score >= 2:
+                azione = random.choice(["COMPRA","ATTENDI"])
+                importo = random.choice([50,100])
+            else:
+                azione = "ATTENDI"
+                importo = 0
+            return {"nome": nome, "score": score, "azione": azione, "importo": importo}
+
+        # Lista degli asset
         data = {
           "aggiornamento": "09:00",
           "segnali": [
-            {"nome": "NASDAQ", "score": random.randint(0,6), "azione": random.choice(["COMPRA","ATTENDI"]), "importo": random.choice([0,50,100,200])},
-            {"nome": "SP500", "score": random.randint(0,6), "azione": random.choice(["COMPRA","ATTENDI"]), "importo": random.choice([0,50,100,200])},
-            {"nome": "NVIDIA", "score": random.randint(0,6), "azione": random.choice(["COMPRA","ATTENDI"]), "importo": random.choice([0,50,100,200])}
+            genera_segnale("NASDAQ"),
+            genera_segnale("SP500"),
+            genera_segnale("NVIDIA")
           ]
         }
+
+        # Scrive i dati in signals.json
         with open("signals.json","w") as f:
             json.dump(data,f)
         EOF
+
+    - name: Commit e push
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "GitHub Actions"
+        git add signals.json
+        git commit -m "Aggiornamento automatico segnali realistici"
+        git push
