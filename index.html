@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="it">
 <head>
@@ -13,28 +14,43 @@ body { font-family: Arial; background:#0f172a; color:white; padding:20px; }
 <body>
 
 <h1>📊 Segnali Mercati</h1>
-<p>Report giornaliero</p>
+<p id="aggiornamento">Aggiornamento: --</p>
 
-<div class="card">
-<h2>NASDAQ</h2>
-<p>Score: 6</p>
-<p class="buy">Azione: COMPRA</p>
-<p>Importo: 200 €</p>
-</div>
+<div id="container"></div>
 
-<div class="card">
-<h2>SP500</h2>
-<p>Score: 5</p>
-<p class="buy">Azione: COMPRA</p>
-<p>Importo: 200 €</p>
-</div>
+<script>
+// Funzione per caricare i dati da signals.json
+fetch('signals.json')
+  .then(response => response.json())
+  .then(data => {
+    // Mostra la data di aggiornamento
+    document.getElementById('aggiornamento').textContent = 
+      "Aggiornamento: " + data.aggiornamento;
 
-<div class="card">
-<h2>NVIDIA</h2>
-<p>Score: 2</p>
-<p class="wait">Azione: ATTENDI</p>
-<p>Importo: 0 €</p>
-</div>
+    const container = document.getElementById('container');
+
+    data.segnali.forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      let azioneClass = item.azione.toLowerCase() === 'compra' ? 'buy' : 'wait';
+
+      card.innerHTML = `
+        <h2>${item.nome}</h2>
+        <p>Score: ${item.score}</p>
+        <p class="${azioneClass}">Azione: ${item.azione}</p>
+        <p>Importo: ${item.importo} €</p>
+      `;
+
+      container.appendChild(card);
+    });
+  })
+  .catch(err => {
+    document.getElementById('container').innerHTML = 
+      '<p>Impossibile leggere signals.json</p>';
+    console.error(err);
+  });
+</script>
 
 </body>
 </html>
