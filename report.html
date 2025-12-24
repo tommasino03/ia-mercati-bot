@@ -1,44 +1,48 @@
 <!DOCTYPE html>
-<html>
+<html lang="it">
 <head>
-    <title>Segnali Mercati</title>
-    <style>
-        body { font-family: Arial; padding: 20px; }
-        .compra { color: green; font-weight: bold; }
-        .vendi { color: red; font-weight: bold; }
-        .neutro { color: gray; }
-        .asset { border-bottom: 1px solid #ccc; margin-bottom: 10px; padding-bottom: 5px; }
-    </style>
+<meta charset="UTF-8">
+<title>📊 Report Segnali Mercati</title>
+<style>
+body { font-family: Arial; background:#0f172a; color:white; padding:20px; }
+h1 { text-align:center; }
+.card { background:#1e293b; padding:20px; margin:15px 0; border-radius:12px; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
+.buy { color:#22c55e; font-weight:bold; font-size:1.1em; }
+.wait { color:#facc15; font-weight:bold; font-size:1.1em; }
+.score { font-size:1em; margin:5px 0; }
+.importo { margin:5px 0; }
+</style>
 </head>
 <body>
-    <h1>Segnali Mercati</h1>
-    <div id="container"></div>
 
-    <script>
-        fetch('signals.json')
-        .then(response => response.json())
-        .then(data => {
-            const container = document.getElementById('container');
-            if(data.length === 0) {
-                container.innerHTML = "<p>Nessun segnale disponibile</p>";
-                return;
-            }
-            data.forEach(a => {
-                const div = document.createElement('div');
-                div.className = 'asset';
-                div.innerHTML = `
-                    <h3>${a.ticker}</h3>
-                    <p>Breve: <span class="${a.breve.includes('COMPRA')?'compra': a.breve.includes('VENDI')?'vendi':'neutro'}">${a.breve}</span></p>
-                    <p>Medio: <span class="${a.medio.includes('COMPRA')?'compra': a.medio.includes('VENDI')?'vendi':'neutro'}">${a.medio}</span></p>
-                    <p>Lungo: <span class="${a.lungo.includes('INVESTI')?'compra': a.lungo.includes('VENDI')?'vendi':'neutro'}">${a.lungo}</span></p>
-                    <p>Motivo: ${a.motivo}</p>
-                `;
-                container.appendChild(div);
-            });
-        })
-        .catch(() => {
-            document.getElementById('container').innerHTML = "<p>Impossibile leggere signals.json</p>";
-        });
-    </script>
+<h1>📊 Report Segnali Mercati</h1>
+<p id="aggiornamento" style="text-align:center;">Aggiornamento: </p>
+<div id="container"></div>
+
+<script>
+fetch('signals.json')
+.then(response => response.json())
+.then(data => {
+  // Mostra ora/data aggiornamento
+  const oraAgg = data.aggiornamento ? data.aggiornamento : "Non disponibile";
+  document.getElementById('aggiornamento').textContent = "Aggiornamento: ore " + oraAgg;
+
+  const container = document.getElementById('container');
+  container.innerHTML = "";
+
+  data.segnali.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <h2>${s.nome}</h2>
+      <p class="score">Score: ${s.score}</p>
+      <p class="${s.azione === 'COMPRA' ? 'buy' : 'wait'}">Azione: ${s.azione}</p>
+      <p class="importo">Importo: ${s.importo} €</p>
+    `;
+    container.appendChild(card);
+  });
+});
+</script>
+
 </body>
 </html>
