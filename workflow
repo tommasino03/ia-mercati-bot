@@ -19,10 +19,17 @@ jobs:
 {
   "aggiornamento": "$TODAY",
   "segnali": [
-    {"nome": "NASDAQ", "score": 6, "azione": "COMPRA", "importo": 200},
-    {"nome": "SP500", "score": 5, "azione": "COMPRA", "importo": 200},
-    {"nome": "NVIDIA", "score": 2, "azione": "ATTENDI", "importo": 0}
-  ]
+   assets = [
+    {"nome": "NASDAQ", "ticker": "^IXIC"},
+    {"nome": "SP500", "ticker": "^GSPC"},
+    {"nome": "NVIDIA", "ticker": "NVDA"},
+    {"nome": "TESLA", "ticker": "TSLA"},
+    {"nome": "APPLE", "ticker": "AAPL"},
+    {"nome": "BTC", "ticker": "BTC-USD"},
+    {"nome": "ETH", "ticker": "ETH-USD"},
+    {"nome": "CARDANO", "ticker": "ADA-USD"}
+]
+
 }
 EOT
 
