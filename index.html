@@ -13,28 +13,31 @@ body { font-family: Arial; background:#0f172a; color:white; padding:20px; }
 <body>
 
 <h1>📊 Segnali Mercati</h1>
-<p>Aggiornamento: ore 09:00</p>
+<p id="aggiornamento">Aggiornamento: </p>
+<div id="container"></div>
 
-<div class="card">
-<h2>NASDAQ</h2>
-<p>Score: 6</p>
-<p class="buy">Azione: COMPRA</p>
-<p>Importo: 200 €</p>
-</div>
+<script>
+fetch('signals.json')
+.then(response => response.json())
+.then(data => {
+  // Mostra ora/data aggiornamento
+  const oraAgg = data.aggiornamento ? data.aggiornamento : "Non disponibile";
+  document.getElementById('aggiornamento').textContent = "Aggiornamento: ore " + oraAgg;
 
-<div class="card">
-<h2>SP500</h2>
-<p>Score: 5</p>
-<p class="buy">Azione: COMPRA</p>
-<p>Importo: 200 €</p>
-</div>
+  const container = document.getElementById('container');
+  container.innerHTML = "";
 
-<div class="card">
-<h2>NVIDIA</h2>
-<p>Score: 2</p>
-<p class="wait">Azione: ATTENDI</p>
-<p>Importo: 0 €</p>
-</div>
+  data.segnali.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<h2>${s.nome}</h2>
+                      <p>Score: ${s.score}</p>
+                      <p class="${s.azione === 'COMPRA' ? 'buy' : 'wait'}">Azione: ${s.azione}</p>
+                      <p>Importo: ${s.importo} €</p>`;
+    container.appendChild(card);
+  });
+});
+</script>
 
 </body>
 </html>
