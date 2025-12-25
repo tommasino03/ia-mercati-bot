@@ -1,7 +1,9 @@
 name: Invio segnali bot
+
+# Ogni giorno alle 9 UTC + possibilità di esecuzione manuale
 on:
   schedule:
-    - cron: "0 9 * * *"  # Ogni giorno alle 9 UTC
+    - cron: "0 9 * * *"
   workflow_dispatch:
 
 jobs:
@@ -20,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install yfinance python-telegram-bot pandas
+        pip install yfinance pandas python-telegram-bot --upgrade
 
     - name: Esegui bot
       run: |
