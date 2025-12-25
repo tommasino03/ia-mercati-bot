@@ -1,65 +1,28 @@
 # bot.py
 import os
-import time
-import yfinance as yf
 from telegram import Bot
+from ia_mercati import calcola_segnali
 
-# --- VARIABILI DA RENDER (NON SCRITTE NEL CODICE) ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+# --- CONFIGURAZIONE ---
+TOKEN = "8268985960:AAHqyZ679C4B4y7ICq96xQy5JU9PJ_1KiZg"  # sostituisci con il tuo token Telegram
+CHAT_ID = "595821281"      # sostituisci con il tuo chat ID
+assets = ["AAPL", "SPY", "NVDA", "BTC-USD"]  # asset da monitorare
 
+# --- CREA OGGETTO BOT ---
 bot = Bot(token=TOKEN)
 
-assets = {
-    "AAPL": "Apple",
-    "SPY": "S&P500",
-    "NVDA": "NVIDIA",
-    "BTC-USD": "Bitcoin"
-}
+# --- CALCOLO SEGNALI ---
+segnali = calcola_segnali(assets)
 
-def calcola_score(ticker):
-    data = yf.download(ticker, period="7d", interval="1d", progress=False)
+# --- INVIO MESSAGGI TELEGRAM ---
+for asset, info in segnali.items():
+    messaggio = (
+        f"📊 {asset}\n"
+        f"Score: {info['score']}\n"
+        f"Azione: {info['azione']}\n"
+        f"Confidence: {info['confidence']*100}%\n"
+        f"Motivi: {', '.join(info['motivi'])}"
+    )
+    bot.send_message(chat_id=CHAT_ID, text=messaggio)
 
-    if len(data) < 2:
-        return 0
-
-    chiusura_oggi = data["Close"].iloc[-1]
-    chiusura_ieri = data["Close"].iloc[-2]
-
-    variazione = (chiusura_oggi - chiusura_ieri) / chiusura_ieri
-
-    if variazione > 0.02:
-        return 7
-    elif variazione > 0:
-        return 5
-    elif variazione > -0.02:
-        return 3
-    else:
-        return 1
-
-def invia_segnali():
-    messaggio_finale = "📊 Segnali Mercati\n\n"
-
-    for ticker, nome in assets.items():
-        score = calcola_score(ticker)
-
-        if score >= 6:
-            azione = "COMPRA"
-        elif score >= 4:
-            azione = "ATTENDI"
-        else:
-            azione = "NON ENTRARE"
-
-        messaggio_finale += (
-            f"{nome}\n"
-            f"Score: {score}\n"
-            f"Azione: {azione}\n\n"
-        )
-
-    bot.send_message(chat_id=CHAT_ID, text=messaggio_finale)
-
-# --- LOOP INFINITO (SERVE A RENDER) ---
-while True:
-    invia_segnali()
-    print("Segnali inviati. Attendo 24 ore.")
-    time.sleep(86400)  # 24 ore
+print("Messaggi inviati con successo!")
