@@ -1,7 +1,9 @@
 # ia_mercati.py
 import yfinance as yf
+import json
+from datetime import datetime
 
-def calcola_segnali(assets):
+def calcola_segnali(assets, file_storico="signals.json"):
     risultati = {}
 
     for asset in assets:
@@ -45,6 +47,9 @@ def calcola_segnali(assets):
                 azione = "COMPRA"
             elif score >= 3:
                 azione = "ATTENDI"
+            elif score < 3 and last_price < last_ma50:
+                azione = "VENDI"
+                motivi.append("Prezzo sotto MA50 (trend negativo)")
             else:
                 azione = "NON ENTRARE"
 
@@ -65,5 +70,16 @@ def calcola_segnali(assets):
                 "motivi": [str(e)]
             }
 
-    return risultati
+    # --- SALVA STORICO ---
+    try:
+        storico = {}
+        if os.path.exists(file_storico):
+            with open(file_storico, "r") as f:
+                storico = json.load(f)
+        storico[datetime.today().strftime("%Y-%m-%d")] = risultati
+        with open(file_storico, "w") as f:
+            json.dump(storico, f, indent=2)
+    except Exception as e:
+        print(f"Errore nel salvare lo storico: {e}")
 
+    return risultati
