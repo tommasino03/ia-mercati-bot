@@ -1,33 +1,28 @@
-name: Telegram Bot Runner
+name: Python Bot Deployment
 
 on:
   push:
-    branches: [ "main" ] # Si attiva ogni volta che carichi modifiche
-  pull_request:
     branches: [ "main" ]
-  schedule:
-    - cron: '0 * * * *' # Opzionale: esegue il bot ogni ora (formato POSIX cron)
+  workflow_dispatch: # Ti permette di avviarlo manualmente
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout del codice
-      uses: actions/checkout@v3
+      - name: Checkout repository content
+        uses: actions/checkout@v3
 
-    - name: Configurazione Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10' # Versione stabile di Python
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10' # Specifica la versione di Python
 
-    - name: Installazione dipendenze
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        # Questo comando installa la libreria telegram e le altre nel file requirements
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Installiamo la libreria che manca e altre comuni
+          pip install python-telegram-bot
 
-    - name: Esecuzione Bot
-      env:
-        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }} # Se usi i "Secrets" di GitHub per il token
-      run: python bot.py
+      - name: Run bot
+        run: python bot.py
