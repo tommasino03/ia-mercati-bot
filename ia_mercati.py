@@ -2,60 +2,57 @@
 import yfinance as yf
 import pandas as pd
 
-def calcola_segnali(asset_list, periodo=50):
-    """
-    asset_list: lista di simboli es. ["AAPL", "SPY", "NVDA", "BTC-USD"]
-    periodo: numero di giorni per la media mobile e il volume medio
-    ritorna: dict con segnali {"ASSET": {"score": int, "azione": str, "confidence": float}}
-    """
-    segnali = {}
+def calcola_segnali(assets):
+    risultati = {}
 
-    for asset in asset_list:
-        # Scarica dati ultimi 6 mesi
-        data = yf.download(asset, period="6mo", interval="1d", progress=False)
+    for asset in assets:
+        try:
+            df = yf.download(asset, period="6mo", interval="1d")
 
-        if data.empty:
-            segnali[asset] = {"score": 0, "azione": "ATTENDI", "confidence": 0}
-            continue
+            if df.empty:
+                continue
 
-        # Prezzo di chiusura e volumi
-        close = data["Close"]
-        vol = data["Volume"]
+            close = df["Close"]
 
-        # Medie mobili
-        ma20 = close[-20:].mean()
-        ma50 = close[-50:].mean()
+            # Medie mobili
+            ma20 = close.rolling(window=20).mean()
+            ma50 = close.rolling(window=50).mean()
 
-        # Volume medio 50 giorni
-        vol50 = vol[-50:].mean()
+            # Valori attuali (ULTIMO GIORNO)
+            prezzo_attuale = close.iloc[-1]
+            ma20_attuale = ma20.iloc[-1]
+            ma50_attuale = ma50.iloc[-1]
 
-        # Score basato su trend e volume
-        score = 0
-        if close.iloc[-1] > ma50:
-            score += 2
-        if close.iloc[-1] > ma20:
-            score += 2
-        if vol.iloc[-1] > vol50:
-            score += 1
+            score = 0
 
-        # Determina azione
-        if score >= 4:
-            azione = "COMPRA"
-        elif score >= 2:
-            azione = "ATTENDI"
-        else:
-            azione = "VENDI"
+            # Logica score (semplice ma corretta)
+            if prezzo_attuale > ma20_attuale:
+                score += 1
+            if prezzo_attuale > ma50_attuale:
+                score += 1
+            if ma20_attuale > ma50_attuale:
+                score += 1
 
-        # Confidence proporzionale allo score
-        confidence = score / 5
+            # Decisione
+            if score >= 2:
+                azione = "COMPRA"
+                confidence = 0.7
+            else:
+                azione = "ATTENDI"
+                confidence = 0.4
 
-        segnali[asset] = {"score": score, "azione": azione, "confidence": round(confidence, 2)}
+            risultati[asset] = {
+                "score": score,
+                "azione": azione,
+                "confidence": confidence
+            }
 
-    return segnali
+        except Exception as e:
+            risultati[asset] = {
+                "score": 0,
+                "azione": "ERRORE",
+                "confidence": 0,
+                "errore": str(e)
+            }
 
-# Esempio di utilizzo:
-if __name__ == "__main__":
-    assets = ["AAPL", "SPY", "NVDA", "BTC-USD"]
-    segnali = calcola_segnali(assets)
-    for a, info in segnali.items():
-        print(f"{a}: {info}")
+    return risultati
