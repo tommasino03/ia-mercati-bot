@@ -1,8 +1,8 @@
-name: Invio segnali bot
+name: Run Telegram Bot
 
 on:
-  schedule:
-    - cron: "0 9 * * *"
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -10,16 +10,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
 
-      - name: Installa librerie
-        run: |
-          pip install yfinance pandas requests
+    - name: Install dependencies
+      run: pip install -r requirements.txt
 
-      - name: Avvia bot
-        run: |
-          python bot.py
+    - name: Run bot
+      run: python bot.py
