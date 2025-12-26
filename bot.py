@@ -1,28 +1,34 @@
 # bot.py
-import os
-from telegram import Bot
+import requests
 from ia_mercati import calcola_segnali
 
-# --- CONFIGURAZIONE ---
-TOKEN = "8268985960:AAHqyZ679C4B4y7ICq96xQy5JU9PJ_1KiZg"  # sostituisci con il tuo token Telegram
-CHAT_ID = "595821281"      # sostituisci con il tuo chat ID
-assets = ["AAPL", "SPY", "NVDA", "BTC-USD"]  # asset da monitorare
+# --- CONFIG ---
+TOKEN = "8268985960:AAHqyZ679C4B4y7ICq96xQy5JU9PJ_1KiZg"
+CHAT_ID = "595821281"
 
-# --- CREA OGGETTO BOT ---
-bot = Bot(token=TOKEN)
+assets = ["AAPL", "SPY", "NVDA", "BTC-USD"]
+
+# --- FUNZIONE INVIO TELEGRAM ---
+def send_telegram_message(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text
+    }
+    requests.post(url, data=payload)
 
 # --- CALCOLO SEGNALI ---
 segnali = calcola_segnali(assets)
 
-# --- INVIO MESSAGGI TELEGRAM ---
+# --- INVIO MESSAGGI ---
 for asset, info in segnali.items():
     messaggio = (
         f"📊 {asset}\n"
         f"Score: {info['score']}\n"
         f"Azione: {info['azione']}\n"
-        f"Confidence: {info['confidence']*100}%\n"
+        f"Confidence: {int(info['confidence']*100)}%\n"
         f"Motivi: {', '.join(info['motivi'])}"
     )
-    bot.send_message(chat_id=CHAT_ID, text=messaggio)
+    send_telegram_message(messaggio)
 
-print("Messaggi inviati con successo!")
+print("Messaggi Telegram inviati con successo")
