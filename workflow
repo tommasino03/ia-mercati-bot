@@ -2,7 +2,7 @@ name: Invio segnali bot
 
 on:
   schedule:
-    - cron: "0 9 * * *"   # ogni giorno alle 9 UTC
+    - cron: "0 9 * * *"
   workflow_dispatch:
 
 jobs:
@@ -10,18 +10,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Scarica il codice
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: Imposta Python
-        uses: actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
       - name: Installa librerie
         run: |
-          python -m pip install --upgrade pip
-          pip install yfinance pandas python-telegram-bot==13.15
+          pip install yfinance pandas requests
 
       - name: Avvia bot
         run: |
