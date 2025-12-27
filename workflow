@@ -1,28 +1,18 @@
-name: Python Bot Deployment
+nome : IA Mercati Bot
 
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch: # Ti permette di avviarlo manualmente
+SU :
+  programma :
+    - cron : " 0 7 * * * "
+  workflow_dispatch :
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+lavori :
+  esegui-bot :
+    in esecuzione : ubuntu-latest
+    passaggi :
+      - usi : azioni/checkout@v3
 
-    steps:
-      - name: Checkout repository content
-        uses: actions/checkout@v3
+      - nome : installa le dipendenze
+        esegui : pip install yfinance requests
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10' # Specifica la versione di Python
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          # Installiamo la libreria che manca e altre comuni
-          pip install python-telegram-bot
-
-      - name: Run bot
-        run: python bot.py
+      - nome : Esegui bot
+        esegui : python bot.py
