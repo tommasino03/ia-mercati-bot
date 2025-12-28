@@ -1,18 +1,29 @@
-nome : IA Mercati Bot
+name: IA Mercati Bot
 
-SU :
-  programma :
-    - cron : " 0 7 * * * "
-  workflow_dispatch :
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
 
-lavori :
-  esegui-bot :
-    in esecuzione : ubuntu-latest
-    passaggi :
-      - usi : azioni/checkout@v3
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
 
-      - nome : installa le dipendenze
-        esegui : pip install yfinance requests
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - nome : Esegui bot
-        esegui : python bot.py
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        run: python bot.py
