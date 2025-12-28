@@ -1,45 +1,25 @@
-name: IA Mercati Bot
+name: Run Telegram Bot
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  run-bot:
+  bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v3
-
-      - name: Show repo files (debug)
-        run: ls -la
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Show python and pip (debug)
-        run: |
-          python --version
-          python -m pip --version
-
-      - name: Show requirements.txt (debug)
-        run: |
-          if [ -f requirements.txt ]; then echo "requirements.txt content:"; cat requirements.txt; else echo "NO requirements.txt"; fi
-
-      - name: Uninstall wrong 'telegram' package if present (debug)
-        run: python -m pip uninstall -y telegram || true
-
-      - name: Install dependencies from requirements.txt
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-
-      - name: Show installed packages (debug)
-        run: python -m pip show python-telegram-bot || python -m pip list
+          pip install python-telegram-bot
 
       - name: Run bot
         env:
