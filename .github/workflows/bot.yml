@@ -1,13 +1,12 @@
-name: Telegram Bot Test
+name: Market Report Daily
 
 on:
-  workflow_dispatch:   # pulsante "Run workflow"
-  push:
-    branches:
-      - main
+  schedule:
+    - cron: "0 7 * * *"   # 9:00 italiane (UTC+2 estate / UTC+1 inverno)
+  workflow_dispatch:
 
 jobs:
-  run-bot:
+  send-report:
     runs-on: ubuntu-latest
 
     steps:
@@ -24,7 +23,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install python-telegram-bot
 
-      - name: Run bot
+      - name: Send market report
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
         run: python bot.py
