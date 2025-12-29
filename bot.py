@@ -9,7 +9,7 @@ if not TOKEN:
     raise RuntimeError(
         "❌ BOT_TOKEN non trovato. "
         "Impostalo in GitHub → Settings → Secrets → Actions "
-        f"(token ottenuto da {})"
+        "e incolla il token ottenuto da @BotFather"
     )
 
 # === HANDLER ===
@@ -21,8 +21,8 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
 
-    # ⚠️ AVVIO TEMPORANEO (GitHub Actions NON è hosting)
-    # Serve solo per testare che il token e il codice siano corretti
+    # ⚠️ GitHub Actions NON è un hosting permanente
+    # Polling usato SOLO per test
     app.run_polling()
 
 if __name__ == "__main__":
