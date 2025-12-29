@@ -10,123 +10,86 @@ TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti nei Secrets GitHub")
+    raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti")
 
-# ===== CONFIGURAZIONE TICKER =====
-AZIONI_USA = ["AAPL","AMZN","GOOGL","META","TSLA","NVDA","JPM","BAC","V","MA","ADBE","CSCO","CMCSA","WMT"]
-ETF = ["SPY","QQQ","VEA","VGK","IWV","VTI","EFA","IEMG"]
+AZIONI_USA = ["AAPL","AMZN","GOOGL","META","TSLA","NVDA","JPM","BAC","V","MA"]
+ETF = ["SPY","QQQ","VTI"]
 AZIONI_EUROPA = ["SAN.MC"]
-CRYPTO = ["bitcoin","ethereum"]  # CoinGecko IDs
+CRYPTO = ["bitcoin","ethereum"]
 
-# ===== FUNZIONE TREND ROBUSTA =====
-def calculate_trend(prices: pd.Series):
-    """
-    Restituisce breve, medio, lungo con controllo dati mancanti
-    """
-    if prices.empty or len(prices) < 50:
-        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
-    
-    try:
-        breve_mean = float(prices[-3:].mean())
-        medio_mean  = float(prices[-10:].mean())
-        lungo_mean  = float(prices[-50:].mean())
-        last_price  = float(prices.iloc[-1])
-    except Exception:
-        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
-    
-    breve = "✅ COMPRA" if breve_mean < last_price else "⚠️ neutro"
-    medio  = "✅ COMPRA" if medio_mean  < last_price else "⚠️ neutro"
-    lungo  = "✅ INVESTI" if lungo_mean  < last_price else "⚠️ neutro"
-    
-    return breve, medio, lungo
+# ================= TREND IA SMART =================
+def calculate_trend(prices: pd.Series, volumes: pd.Series | None = None):
+    if prices.empty or len(prices) < 60:
+        return "⚠️ HOLD", "Dati insufficienti"
 
-# ===== COSTRUZIONE REPORT =====
+    prices = prices.astype(float)
+
+    sma5 = prices.rolling(5).mean().iloc[-1]
+    sma20 = prices.rolling(20).mean().iloc[-1]
+    sma50 = prices.rolling(50).mean().iloc[-1]
+    last = prices.iloc[-1]
+
+    volume_ok = True
+    if volumes is not None and not volumes.empty:
+        vol_mean = volumes.rolling(20).mean().iloc[-1]
+        vol_last = volumes.iloc[-1]
+        volume_ok = vol_last >= vol_mean
+
+    if last > sma5 > sma20 > sma50 and volume_ok:
+        return "🟢 BUY", "Trend rialzista forte + volumi"
+    elif last < sma20:
+        return "🔴 SELL", "Prezzo sotto SMA20"
+    else:
+        return "🟡 HOLD", "Trend laterale / in attesa"
+
+# ================= REPORT =================
 def build_report():
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
-    report = f"📊 REPORT IA MERCATI – {now}\n\n"
+    report = f"📊 REPORT IA MERCATI SMART – {now}\n\n"
 
-    # --- Azioni USA ---
-    report += "--- Azioni USA ---\n"
-    for ticker in AZIONI_USA:
+    report += "--- AZIONI USA ---\n"
+    for t in AZIONI_USA:
         try:
-            data = yf.download(ticker, period="60d", interval="1d")["Close"]
+            df = yf.download(t, period="3mo", interval="1d", progress=False)
+            signal, reason = calculate_trend(df["Close"], df["Volume"])
         except Exception:
-            data = pd.Series()
-        trend = calculate_trend(data)
-        report += (
-            f"📌 {ticker}\n"
-            f"Breve: {trend[0]}\n"
-            f"Medio: {trend[1]}\n"
-            f"Lungo: {trend[2]}\n"
-            f"Motivo: trend breve {trend[0]}, trend medio {trend[1]}, trend lungo {trend[2]}, volumi normali\n\n"
-        )
+            signal, reason = "⚠️ HOLD", "Errore dati"
+        report += f"📌 {t}\nSegnale: {signal}\nMotivo: {reason}\n\n"
 
-    # --- ETF ---
     report += "--- ETF ---\n"
-    for etf in ETF:
+    for t in ETF:
         try:
-            data = yf.download(etf, period="60d", interval="1d")["Close"]
+            df = yf.download(t, period="3mo", interval="1d", progress=False)
+            signal, reason = calculate_trend(df["Close"], df["Volume"])
         except Exception:
-            data = pd.Series()
-        trend = calculate_trend(data)
-        report += (
-            f"📌 {etf}\n"
-            f"Breve: {trend[0]}\n"
-            f"Medio: {trend[1]}\n"
-            f"Lungo: {trend[2]}\n"
-            f"Motivo: trend breve {trend[0]}, trend medio {trend[1]}, trend lungo {trend[2]}, volumi normali\n\n"
-        )
+            signal, reason = "⚠️ HOLD", "Errore dati"
+        report += f"📌 {t}\nSegnale: {signal}\nMotivo: {reason}\n\n"
 
-    # --- Crypto ---
-    report += "--- Crypto ---\n"
+    report += "--- CRYPTO ---\n"
     for coin in CRYPTO:
         try:
-            url = f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart?vs_currency=usd&days=60&interval=daily"
-            r = requests.get(url, timeout=10).json()
-            prices = [p[1] for p in r.get("prices", [])]
-            prices = pd.Series(prices)
+            url = f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart?vs_currency=usd&days=90"
+            data = requests.get(url, timeout=10).json()
+            prices = pd.Series([p[1] for p in data["prices"]])
+            signal, reason = calculate_trend(prices)
         except Exception:
-            prices = pd.Series()
-        trend = calculate_trend(prices)
-        report += (
-            f"📌 {coin.upper()}\n"
-            f"Breve: {trend[0]}\n"
-            f"Medio: {trend[1]}\n"
-            f"Lungo: {trend[2]}\n"
-            f"Motivo: trend breve {trend[0]}, trend medio {trend[1]}, trend lungo {trend[2]}\n\n"
-        )
+            signal, reason = "⚠️ HOLD", "Errore dati"
+        report += f"📌 {coin.upper()}\nSegnale: {signal}\nMotivo: {reason}\n\n"
 
-    # --- Azioni Europa ---
-    report += "--- Azioni Europa ---\n"
-    for ticker in AZIONI_EUROPA:
-        try:
-            data = yf.download(ticker, period="60d", interval="1d")["Close"]
-        except Exception:
-            data = pd.Series()
-        trend = calculate_trend(data)
-        report += (
-            f"📌 {ticker}\n"
-            f"Breve: {trend[0]}\n"
-            f"Medio: {trend[1]}\n"
-            f"Lungo: {trend[2]}\n"
-            f"Motivo: trend breve {trend[0]}, trend medio {trend[1]}, trend lungo {trend[2]}, volumi normali\n\n"
-        )
-
-    # --- Situazione Generale ---
     report += (
-        "🧠 SITUAZIONE GENERALE:\n"
-        "Mercato: POSITIVO\n"
-        "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
-        "Rischio: MEDIO"
+        "🧠 STRATEGIA IA:\n"
+        "✔ BUY solo su trend confermati\n"
+        "✔ HOLD su mercati incerti\n"
+        "✔ SELL su rottura supporti\n"
+        "⚠️ Rischio: MEDIO\n"
     )
 
     return report
 
-# ===== INVIO TELEGRAM =====
+# ================= TELEGRAM =================
 async def main():
     bot = Bot(token=TOKEN)
-    report = build_report()
-    await bot.send_message(chat_id=CHAT_ID, text=report)
+    await bot.send_message(chat_id=CHAT_ID, text=build_report())
 
 if __name__ == "__main__":
     asyncio.run(main())
