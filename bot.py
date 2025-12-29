@@ -2,25 +2,28 @@ import os
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = os.environ.get("BOT_TOKEN")  # Inserisci il token del tuo bot come variabile d'ambiente
+# === TOKEN ===
+TOKEN = os.environ.get("BOT_TOKEN")
 
-# Esempio semplice di comando /start
+if not TOKEN:
+    raise RuntimeError(
+        "❌ BOT_TOKEN non trovato. "
+        "Impostalo in GitHub → Settings → Secrets → Actions "
+        f"(token ottenuto da {})"
+    )
+
+# === HANDLER ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Ciao! Il bot è attivo e funzionante 🚀")
+    await update.message.reply_text("✅ Bot attivo e funzionante!")
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Aggiungi i comandi
     app.add_handler(CommandHandler("start", start))
 
-    # Avvio del webhook
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8443)),
-        url_path=TOKEN,
-        webhook_url=f"https://{os.environ.get('PROJECT_DOMAIN')}.repl.co/{TOKEN}"  # Cambia se non usi Replit
-    )
+    # ⚠️ AVVIO TEMPORANEO (GitHub Actions NON è hosting)
+    # Serve solo per testare che il token e il codice siano corretti
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
