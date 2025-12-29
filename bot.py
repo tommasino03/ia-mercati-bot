@@ -10,25 +10,27 @@ TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti nei Secrets")
+    raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti nei Secrets GitHub")
 
-# ===== AZIONI / ETF / CRYPTO =====
+# ===== CONFIGURAZIONE TICKER =====
 AZIONI_USA = ["AAPL","AMZN","GOOGL","META","TSLA","NVDA","JPM","BAC","V","MA","ADBE","CSCO","CMCSA","WMT"]
 ETF = ["SPY","QQQ","VEA","VGK","IWV","VTI","EFA","IEMG"]
 AZIONI_EUROPA = ["SAN.MC"]
 CRYPTO = ["bitcoin","ethereum"]  # CoinGecko IDs
 
-# ===== FUNZIONE TREND =====
-def calculate_trend(prices):
+# ===== FUNZIONE TREND ROBUSTA =====
+def calculate_trend(prices: pd.Series):
     """
-    Restituisce segnale semplice: breve/medio/lungo
+    Restituisce breve, medio, lungo con controllo dati mancanti
     """
-    breve = "✅ COMPRA" if prices[-3:].mean() < prices[-1] else "⚠️ neutro"
-    medio = "✅ COMPRA" if prices[-10:].mean() < prices[-1] else "⚠️ neutro"
-    lungo = "✅ INVESTI" if prices[-50:].mean() < prices[-1] else "⚠️ neutro"
+    if prices.empty or len(prices) < 50:
+        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
+    breve = "✅ COMPRA" if prices[-3:].mean() < prices.iloc[-1] else "⚠️ neutro"
+    medio = "✅ COMPRA" if prices[-10:].mean() < prices.iloc[-1] else "⚠️ neutro"
+    lungo = "✅ INVESTI" if prices[-50:].mean() < prices.iloc[-1] else "⚠️ neutro"
     return breve, medio, lungo
 
-# ===== FUNZIONE REPORT =====
+# ===== COSTRUZIONE REPORT =====
 def build_report():
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
     report = f"📊 REPORT IA MERCATI – {now}\n\n"
@@ -36,7 +38,10 @@ def build_report():
     # --- Azioni USA ---
     report += "--- Azioni USA ---\n"
     for ticker in AZIONI_USA:
-        data = yf.download(ticker, period="60d", interval="1d")["Close"]
+        try:
+            data = yf.download(ticker, period="60d", interval="1d")["Close"]
+        except Exception:
+            data = pd.Series()
         trend = calculate_trend(data)
         report += (
             f"📌 {ticker}\n"
@@ -49,7 +54,10 @@ def build_report():
     # --- ETF ---
     report += "--- ETF ---\n"
     for etf in ETF:
-        data = yf.download(etf, period="60d", interval="1d")["Close"]
+        try:
+            data = yf.download(etf, period="60d", interval="1d")["Close"]
+        except Exception:
+            data = pd.Series()
         trend = calculate_trend(data)
         report += (
             f"📌 {etf}\n"
@@ -62,10 +70,14 @@ def build_report():
     # --- Crypto ---
     report += "--- Crypto ---\n"
     for coin in CRYPTO:
-        url = f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart?vs_currency=usd&days=60&interval=daily"
-        r = requests.get(url).json()
-        prices = [p[1] for p in r["prices"]]
-        trend = calculate_trend(pd.Series(prices))
+        try:
+            url = f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart?vs_currency=usd&days=60&interval=daily"
+            r = requests.get(url, timeout=10).json()
+            prices = [p[1] for p in r.get("prices", [])]
+            prices = pd.Series(prices)
+        except Exception:
+            prices = pd.Series()
+        trend = calculate_trend(prices)
         report += (
             f"📌 {coin.upper()}\n"
             f"Breve: {trend[0]}\n"
@@ -77,7 +89,10 @@ def build_report():
     # --- Azioni Europa ---
     report += "--- Azioni Europa ---\n"
     for ticker in AZIONI_EUROPA:
-        data = yf.download(ticker, period="60d", interval="1d")["Close"]
+        try:
+            data = yf.download(ticker, period="60d", interval="1d")["Close"]
+        except Exception:
+            data = pd.Series()
         trend = calculate_trend(data)
         report += (
             f"📌 {ticker}\n"
@@ -96,7 +111,7 @@ def build_report():
 
     return report
 
-# ===== INVIO =====
+# ===== INVIO TELEGRAM =====
 async def main():
     bot = Bot(token=TOKEN)
     report = build_report()
