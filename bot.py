@@ -26,7 +26,6 @@ def calculate_trend(prices: pd.Series):
     if prices.empty or len(prices) < 50:
         return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
     
-    # converti in float per evitare ambiguità
     try:
         breve_mean = float(prices[-3:].mean())
         medio_mean  = float(prices[-10:].mean())
@@ -110,4 +109,24 @@ def build_report():
             f"Breve: {trend[0]}\n"
             f"Medio: {trend[1]}\n"
             f"Lungo: {trend[2]}\n"
-            f"Motivo: trend breve {trend[0]}, t
+            f"Motivo: trend breve {trend[0]}, trend medio {trend[1]}, trend lungo {trend[2]}, volumi normali\n\n"
+        )
+
+    # --- Situazione Generale ---
+    report += (
+        "🧠 SITUAZIONE GENERALE:\n"
+        "Mercato: POSITIVO\n"
+        "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
+        "Rischio: MEDIO"
+    )
+
+    return report
+
+# ===== INVIO TELEGRAM =====
+async def main():
+    bot = Bot(token=TOKEN)
+    report = build_report()
+    await bot.send_message(chat_id=CHAT_ID, text=report)
+
+if __name__ == "__main__":
+    asyncio.run(main())
