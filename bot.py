@@ -6,41 +6,74 @@ import pandas as pd
 import requests
 from telegram import Bot
 
+# ================= CONFIG =================
 TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti")
+    raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti nei Secrets GitHub")
 
-AZIONI_USA = ["AAPL","AMZN","GOOGL","META","TSLA","NVDA","JPM","BAC","V","MA"]
-ETF = ["SPY","QQQ","VTI"]
+AZIONI_USA = ["AAPL", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM", "BAC", "V", "MA"]
+ETF = ["SPY", "QQQ", "VTI"]
 AZIONI_EUROPA = ["SAN.MC"]
-CRYPTO = ["bitcoin","ethereum"]
+CRYPTO = ["bitcoin", "ethereum"]
 
-# ================= TREND IA SMART =================
+# ================= ANALISI IA =================
 def calculate_trend(prices: pd.Series, volumes: pd.Series | None = None):
-    if prices.empty or len(prices) < 60:
-        return "⚠️ HOLD", "Dati insufficienti"
+    try:
+        if prices.empty or len(prices) < 60:
+            return "⚠️ HOLD", "Dati insufficienti"
 
-    prices = prices.astype(float)
+        prices = prices.astype(float)
 
-    sma5 = prices.rolling(5).mean().iloc[-1]
-    sma20 = prices.rolling(20).mean().iloc[-1]
-    sma50 = prices.rolling(50).mean().iloc[-1]
-    last = prices.iloc[-1]
+        # Medie mobili
+        sma20 = prices.rolling(20).mean()
+        sma50 = prices.rolling(50).mean()
 
-    volume_ok = True
-    if volumes is not None and not volumes.empty:
-        vol_mean = volumes.rolling(20).mean().iloc[-1]
-        vol_last = volumes.iloc[-1]
-        volume_ok = vol_last >= vol_mean
+        last_price = prices.iloc[-1]
 
-    if last > sma5 > sma20 > sma50 and volume_ok:
-        return "🟢 BUY", "Trend rialzista forte + volumi"
-    elif last < sma20:
-        return "🔴 SELL", "Prezzo sotto SMA20"
-    else:
-        return "🟡 HOLD", "Trend laterale / in attesa"
+        # RSI
+        delta = prices.diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        rsi_last = rsi.iloc[-1]
+
+        # MACD
+        ema12 = prices.ewm(span=12, adjust=False).mean()
+        ema26 = prices.ewm(span=26, adjust=False).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9, adjust=False).mean()
+
+        macd_last = macd.iloc[-1]
+        signal_last = signal.iloc[-1]
+
+        # Volume
+        volume_ok = True
+        if volumes is not None and not volumes.empty:
+            volumes = volumes.astype(float)
+            volume_ok = volumes.iloc[-1] >= volumes.rolling(20).mean().iloc[-1]
+
+        # LOGICA FINALE
+        if (
+            last_price > sma20.iloc[-1] > sma50.iloc[-1]
+            and macd_last > signal_last
+            and rsi_last < 70
+            and volume_ok
+        ):
+            return "🟢 BUY", f"Trend forte | RSI {round(rsi_last,1)} | MACD positivo"
+
+        if rsi_last > 70:
+            return "🔴 SELL", f"Ipercomprato | RSI {round(rsi_last,1)}"
+
+        if last_price < sma20.iloc[-1]:
+            return "🔴 SELL", "Rottura supporto SMA20"
+
+        return "🟡 HOLD", f"Laterale | RSI {round(rsi_last,1)}"
+
+    except Exception:
+        return "⚠️ HOLD", "Errore calcolo"
 
 # ================= REPORT =================
 def build_report():
@@ -70,7 +103,7 @@ def build_report():
         try:
             url = f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart?vs_currency=usd&days=90"
             data = requests.get(url, timeout=10).json()
-            prices = pd.Series([p[1] for p in data["prices"]])
+            prices = pd.Series([p[1] for p in data.get("prices", [])])
             signal, reason = calculate_trend(prices)
         except Exception:
             signal, reason = "⚠️ HOLD", "Errore dati"
@@ -80,8 +113,8 @@ def build_report():
         "🧠 STRATEGIA IA:\n"
         "✔ BUY solo su trend confermati\n"
         "✔ HOLD su mercati incerti\n"
-        "✔ SELL su rottura supporti\n"
-        "⚠️ Rischio: MEDIO\n"
+        "✔ SELL su rotture o ipercomprato\n"
+        "⚠️ Rischio: MEDIO"
     )
 
     return report
