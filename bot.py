@@ -25,9 +25,20 @@ def calculate_trend(prices: pd.Series):
     """
     if prices.empty or len(prices) < 50:
         return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
-    breve = "✅ COMPRA" if prices[-3:].mean() < prices.iloc[-1] else "⚠️ neutro"
-    medio = "✅ COMPRA" if prices[-10:].mean() < prices.iloc[-1] else "⚠️ neutro"
-    lungo = "✅ INVESTI" if prices[-50:].mean() < prices.iloc[-1] else "⚠️ neutro"
+    
+    # converti in float per evitare ambiguità
+    try:
+        breve_mean = float(prices[-3:].mean())
+        medio_mean  = float(prices[-10:].mean())
+        lungo_mean  = float(prices[-50:].mean())
+        last_price  = float(prices.iloc[-1])
+    except Exception:
+        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
+    
+    breve = "✅ COMPRA" if breve_mean < last_price else "⚠️ neutro"
+    medio  = "✅ COMPRA" if medio_mean  < last_price else "⚠️ neutro"
+    lungo  = "✅ INVESTI" if lungo_mean  < last_price else "⚠️ neutro"
+    
     return breve, medio, lungo
 
 # ===== COSTRUZIONE REPORT =====
@@ -99,23 +110,4 @@ def build_report():
             f"Breve: {trend[0]}\n"
             f"Medio: {trend[1]}\n"
             f"Lungo: {trend[2]}\n"
-            f"Motivo: trend breve {trend[0]}, trend medio {trend[1]}, trend lungo {trend[2]}, volumi normali\n\n"
-        )
-
-    report += (
-        "🧠 SITUAZIONE GENERALE:\n"
-        "Mercato: POSITIVO\n"
-        "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
-        "Rischio: MEDIO"
-    )
-
-    return report
-
-# ===== INVIO TELEGRAM =====
-async def main():
-    bot = Bot(token=TOKEN)
-    report = build_report()
-    await bot.send_message(chat_id=CHAT_ID, text=report)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            f"Motivo: trend breve {trend[0]}, t
