@@ -1,49 +1,36 @@
 import os
 import asyncio
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-)
+from telegram import Bot
 
 TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
 if not TOKEN:
-    raise RuntimeError("❌ BOT_TOKEN mancante nei Secrets GitHub")
+    raise RuntimeError("❌ BOT_TOKEN mancante nei GitHub Secrets")
 
-# === MESSAGGIO AUTOMATICO ===
-async def send_market_study(context: ContextTypes.DEFAULT_TYPE):
-    chat_id = context.job.chat_id
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text="📊 Analisi di mercato completata.\n"
-             "Trend attuale: rialzista.\n"
-             "Volatilità: media.\n"
-             "Rischio: controllato."
+if not CHAT_ID:
+    raise RuntimeError("❌ CHAT_ID mancante nei GitHub Secrets")
+
+async def main():
+    bot = Bot(token=TOKEN)
+
+    message = (
+        "📊 *Studio del mercato – Report giornaliero*\n\n"
+        "📈 Trend principale: rialzista\n"
+        "📉 Volatilità: moderata\n"
+        "⚠️ Rischio: medio\n\n"
+        "🧠 Strategia suggerita:\n"
+        "- Attendere conferme\n"
+        "- Gestione rischio attiva\n"
+        "- No overtrading\n\n"
+        "⏰ Report generato automaticamente"
     )
 
-# === /start ===
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "✅ Bot avviato.\n"
-        "📈 Analisi di mercato in corso...\n"
-        "Riceverai il report tra 2 minuti."
+    await bot.send_message(
+        chat_id=CHAT_ID,
+        text=message,
+        parse_mode="Markdown"
     )
-
-    # invio dopo 120 secondi
-    context.job_queue.run_once(
-        send_market_study,
-        when=120,
-        chat_id=update.effective_chat.id,
-        name="market_study"
-    )
-
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.run_polling()
 
 if __name__ == "__main__":
-    main()
-
+    asyncio.run(main())
