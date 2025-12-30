@@ -1,35 +1,29 @@
-name: IA Mercati - Report Giornaliero
+name: Telegram Market Bot
 
-# Esecuzione automatica ogni giorno alle 9:00 italiane + possibilità di esecuzione manuale
 on:
   schedule:
-    - cron: "0 7 * * *"   # 9:00 ITA (UTC)
+    - cron: "0 7 * * *"   # 09:00 Italia (UTC+2)
   workflow_dispatch:
 
 jobs:
-  send-report:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout del repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Imposta Python
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # 3️⃣ Installa librerie necessarie
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install python-telegram-bot yfinance pandas requests
+          pip install python-telegram-bot==20.8 yfinance pandas
 
-      # 4️⃣ Esegui il bot per generare il report
-      - name: Generate and send report
+      - name: Run bot
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python bot.py
