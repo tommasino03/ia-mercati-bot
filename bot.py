@@ -5,45 +5,21 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 
-# ====== LETTURA ROBUSTA SECRETS ======
-def get_env(*names):
-    for name in names:
-        value = os.environ.get(name)
-        if value:
-            return value
-    return None
+TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 
-TOKEN = get_env(
-    "TELEGRAM_TOKEN",
-    "BOT_TOKEN",
-    "TELEGRAM_BOT_TOKEN"
-)
-
-CHAT_ID = get_env(
-    "TELEGRAM_CHAT_ID",
-    "CHAT_ID",
-    "TELEGRAM_CHATID"
-)
-
-# ====== ASSET ======
 ASSETS = {
     "Azioni USA": ["AAPL", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM", "BAC", "V", "MA", "ADBE", "CSCO", "CMCSA", "WMT"],
     "ETF": ["SPY", "QQQ", "VEA", "VGK", "IWV", "VTI", "EFA", "IEMG"],
     "Azioni Europa": ["SAN.MC"]
 }
 
-# ====== ANALISI ======
 def calculate_trend(close: pd.Series):
-    if len(close) < 30:
-        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
-
     last = close.iloc[-1]
     breve = "✅ COMPRA" if last > close.iloc[-5:].mean() else "⚠️ neutro"
     medio = "✅ COMPRA" if last > close.iloc[-20:].mean() else "⚠️ neutro"
     lungo = "✅ INVESTI" if last > close.mean() else "⚠️ neutro"
-
     return breve, medio, lungo
-
 
 def analyze_symbol(symbol):
     data = yf.download(symbol, period="6mo", interval="1d", progress=False)
@@ -61,15 +37,14 @@ def analyze_symbol(symbol):
         f"Motivo: trend breve {breve}, trend medio {medio}, trend lungo {lungo}, volumi normali\n\n"
     )
 
-
 def build_report():
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
     report = f"📊 REPORT IA MERCATI – {now}\n\n"
 
     for category, symbols in ASSETS.items():
         report += f"--- {category} ---\n"
-        for symbol in symbols:
-            report += analyze_symbol(symbol)
+        for s in symbols:
+            report += analyze_symbol(s)
 
     report += (
         "🧠 SITUAZIONE GENERALE:\n"
@@ -79,17 +54,9 @@ def build_report():
     )
     return report
 
-
-# ====== MAIN ======
 async def main():
-    if not TOKEN or not CHAT_ID:
-        raise RuntimeError(
-            "Secrets non trovati. Controlla che esistano BOT_TOKEN / TELEGRAM_TOKEN e CHAT_ID"
-        )
-
     bot = Bot(token=TOKEN)
     await bot.send_message(chat_id=CHAT_ID, text=build_report())
-
 
 if __name__ == "__main__":
     asyncio.run(main())
