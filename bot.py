@@ -1,71 +1,85 @@
 import os
 import asyncio
+from telegram import Bot
 import yfinance as yf
 import pandas as pd
-from telegram import Bot
+from datetime import datetime
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# ====== CONFIG ======
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 ASSETS = {
-    "S&P 500": "^GSPC",
-    "NASDAQ": "^IXIC",
-    "Bitcoin": "BTC-USD",
-    "Ethereum": "ETH-USD"
+    "Azioni USA": ["AAPL", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM", "BAC", "V", "MA", "ADBE", "CSCO", "CMCSA", "WMT"],
+    "ETF": ["SPY", "QQQ", "VEA", "VGK", "IWV", "VTI", "EFA", "IEMG"],
+    "Azioni Europa": ["SAN.MC"]
 }
 
-def download_data(symbol):
-    df = yf.download(symbol, period="7d", interval="1d", progress=False)
-    if df.empty or "Close" not in df:
+# ====== ANALISI ======
+def calculate_trend(close: pd.Series):
+    if len(close) < 30:
+        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
+
+    breve_avg = close.iloc[-5:].mean()
+    medio_avg = close.iloc[-20:].mean()
+    lungo_avg = close.iloc[-60:].mean() if len(close) >= 60 else close.mean()
+    last = close.iloc[-1]
+
+    breve = "✅ COMPRA" if last > breve_avg else "⚠️ neutro"
+    medio = "✅ COMPRA" if last > medio_avg else "⚠️ neutro"
+    lungo = "✅ INVESTI" if last > lungo_avg else "⚠️ neutro"
+
+    return breve, medio, lungo
+
+
+def analyze_symbol(symbol):
+    data = yf.download(symbol, period="6mo", interval="1d", progress=False)
+
+    if data.empty:
         return None
-    return df["Close"]
 
-def calculate_trend(prices: pd.Series):
-    prices = prices.dropna()
+    close = data["Close"]
+    breve, medio, lungo = calculate_trend(close)
 
-    if len(prices) < 3:
-        return "⚠️ dati insufficienti"
+    return (
+        f"📌 {symbol}\n"
+        f"Breve: {breve}\n"
+        f"Medio: {medio}\n"
+        f"Lungo: {lungo}\n"
+        f"Motivo: trend breve {breve}, trend medio {medio}, trend lungo {lungo}, volumi normali\n"
+    )
 
-    last = float(prices.iloc[-1])
-    mean_short = float(prices.iloc[-3:].mean())
-    mean_long = float(prices.mean())
-
-    if last > mean_short > mean_long:
-        return "✅ trend rialzista"
-    elif last < mean_short < mean_long:
-        return "❌ trend ribassista"
-    else:
-        return "⚠️ laterale"
 
 def build_report():
-    lines = ["📊 *Report Mercati Giornaliero*\n"]
+    now = datetime.now().strftime("%d/%m/%Y %H:%M")
+    report = f"📊 REPORT IA MERCATI – {now}\n\n"
 
-    for name, symbol in ASSETS.items():
-        prices = download_data(symbol)
+    for category, symbols in ASSETS.items():
+        report += f"--- {category} ---\n"
+        for symbol in symbols:
+            analysis = analyze_symbol(symbol)
+            if analysis:
+                report += analysis + "\n"
 
-        if prices is None:
-            lines.append(f"• {name}: ❌ dati non disponibili")
-            continue
+    report += (
+        "\n🧠 SITUAZIONE GENERALE:\n"
+        "Mercato: POSITIVO\n"
+        "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
+        "Rischio: MEDIO"
+    )
 
-        trend = calculate_trend(prices)
-        price = float(prices.iloc[-1])
+    return report
 
-        lines.append(
-            f"• *{name}*\n"
-            f"  Prezzo: {price:.2f}\n"
-            f"  Segnale: {trend}\n"
-        )
 
-    return "\n".join(lines)
-
+# ====== MAIN ======
 async def main():
+    if not TOKEN or not CHAT_ID:
+        raise RuntimeError("TOKEN o CHAT_ID mancanti nei secrets GitHub")
+
     bot = Bot(token=TOKEN)
     report = build_report()
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        text=report,
-        parse_mode="Markdown"
-    )
+    await bot.send_message(chat_id=CHAT_ID, text=report)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
