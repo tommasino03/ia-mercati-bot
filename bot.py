@@ -7,14 +7,18 @@ import yfinance as yf
 import pandas as pd
 from telegram import Bot
 
-# ================= SECRETS =================
+# ================== SECRETS ==================
 TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
+if not TOKEN or not CHAT_ID:
+    raise RuntimeError("BOT_TOKEN / CHAT_ID mancanti nei GitHub Secrets")
+
+# ================== CONFIG ==================
 ASSET_FILE = "assets.json"
 DEFAULT_ASSETS = ["AAPL", "AMZN", "GOOGL", "META", "NVDA", "SPY", "QQQ"]
 
-# ================= ASSETS =================
+# ================== ASSETS ==================
 def load_assets():
     if not os.path.exists(ASSET_FILE):
         save_assets(DEFAULT_ASSETS)
@@ -26,20 +30,19 @@ def save_assets(assets):
     with open(ASSET_FILE, "w") as f:
         json.dump(assets, f)
 
-# ================= DATA =================
-def get_close(symbol):
+# ================== DATA ==================
+def get_close(symbol: str) -> pd.Series | None:
     df = yf.download(symbol, period="6mo", interval="1d", progress=False)
     if df.empty or "Close" not in df:
         return None
     return df["Close"].dropna()
 
-# ================= AI SCORE =================
+# ================== SCORE ENGINE ==================
 def calculate_score(close: pd.Series) -> int:
     if len(close) < 60:
         return 0
 
     last = close.iloc[-1]
-
     ema20 = close.ewm(span=20).mean().iloc[-1]
     ema50 = close.ewm(span=50).mean().iloc[-1]
 
@@ -48,12 +51,15 @@ def calculate_score(close: pd.Series) -> int:
 
     score = 0
 
+    # Trend
     if last > ema20 and ema20 > ema50:
         score += 40
 
+    # Momentum
     if momentum > 0:
         score += min(30, int(momentum))
 
+    # Volatilità (VALORE SCALARE)
     if volatility < 0.02:
         score += 30
     elif volatility < 0.04:
@@ -61,22 +67,22 @@ def calculate_score(close: pd.Series) -> int:
 
     return min(score, 100)
 
-# ================= OPTIMIZATION =================
+# ================== FILTER ==================
 def optimize_assets(assets):
-    selected = []
+    valid = []
 
     for s in assets:
         close = get_close(s)
         if close is None:
             continue
         if calculate_score(close) >= 50:
-            selected.append(s)
+            valid.append(s)
 
-    return selected if selected else assets
+    return valid if valid else assets
 
-# ================= ALERTS =================
+# ================== ALERTS ==================
 def build_alerts(assets):
-    lines = []
+    alerts = []
 
     for s in assets:
         close = get_close(s)
@@ -85,18 +91,15 @@ def build_alerts(assets):
 
         score = calculate_score(close)
         if score >= 70:
-            lines.append(f"✅ {s} → SCORE {score}/100")
+            alerts.append(f"✅ {s} — SCORE {score}/100")
 
-    if not lines:
+    if not alerts:
         return None
 
-    return "🚨 SEGNALI AI FORTI\n\n" + "\n".join(lines)
+    return "🚨 SEGNALI DI MERCATO\n\n" + "\n".join(alerts)
 
-# ================= MAIN =================
+# ================== MAIN ==================
 async def main():
-    if not TOKEN or not CHAT_ID:
-        raise RuntimeError("Secrets mancanti")
-
     bot = Bot(token=TOKEN)
     assets = load_assets()
 
