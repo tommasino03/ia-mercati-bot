@@ -16,7 +16,8 @@ ASSETS = {
         "JPM","BAC","V","MA","ADBE","CSCO","CMCSA","WMT"
     ],
     "ETF": ["SPY","QQQ","VEA","VGK","IWV","VTI","EFA","IEMG"],
-    "Azioni Europa": ["SAN.MC"]
+    "Azioni Europa": ["SAN.MC"],
+    "Crypto": ["BTC-USD", "ETH-USD", "SOL-USD"]
 }
 
 # ====== INDICATORI ======
@@ -45,12 +46,11 @@ def calculate_trend(close: pd.Series):
     ema50 = close.ewm(span=50).mean()
     rsi = calculate_rsi(close).iloc[-1]
 
-    # ---- LOGICA PROFESSIONALE ----
     breve = "✅ COMPRA" if last > ema20.iloc[-1] and rsi < 70 else "⚠️ neutro"
     medio = "✅ COMPRA" if ema20.iloc[-1] > ema50.iloc[-1] else "⚠️ neutro"
     lungo = "✅ INVESTI" if last > ema50.iloc[-1] else "⚠️ neutro"
 
-    rsi_text = f"RSI {round(rsi,1)}"
+    rsi_text = f"RSI {round(float(rsi),1)}"
 
     return breve, medio, lungo, rsi_text
 
