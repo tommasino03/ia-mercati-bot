@@ -26,48 +26,70 @@ def save_assets(assets):
     with open(ASSET_FILE, "w") as f:
         json.dump(assets, f)
 
-# ================= STRATEGY =================
-def signal(close: pd.Series):
-    ema20 = close.ewm(span=20).mean()
-    ema50 = close.ewm(span=50).mean()
-    return (ema20 > ema50).astype(int)
-
-def backtest(symbol):
+# ================= DATA =================
+def get_data(symbol):
     data = yf.download(symbol, period="6mo", interval="1d", progress=False)
-    if data.empty:
+    if data.empty or "Close" not in data:
         return None
+    return data["Close"]
 
-    close = data["Close"]
-    sig = signal(close)
+# ================= AI SCORE =================
+def calculate_score(close: pd.Series):
+    if len(close) < 60:
+        return 0
 
-    ret = close.pct_change().fillna(0)
-    strat = ret * sig.shift(1).fillna(0)
+    close = close.dropna()
+    last = float(close.iloc[-1])
 
-    strat_perf = (1 + strat).prod() - 1
-    buy_hold = (1 + ret).prod() - 1
+    ema20 = float(close.ewm(span=20).mean().iloc[-1])
+    ema50 = float(close.ewm(span=50).mean().iloc[-1])
 
-    return strat_perf, buy_hold
+    momentum = (last / float(close.iloc[-20]) - 1) * 100
+    volatility = close.pct_change().std() * 100
+
+    score = 0
+
+    if last > ema20 > ema50:
+        score += 40
+    if momentum > 0:
+        score += min(30, momentum)
+    if volatility < 2:
+        score += 30
+    elif volatility < 4:
+        score += 15
+
+    return int(min(score, 100))
 
 # ================= OPTIMIZATION =================
 def optimize_assets(assets):
     winners = []
 
     for s in assets:
-        result = backtest(s)
-        if not result:
+        close = get_data(s)
+        if close is None:
             continue
-        strat, hold = result
-        if strat > hold:
+        score = calculate_score(close)
+        if score >= 50:
             winners.append(s)
 
     return winners if winners else assets
 
 # ================= REPORT =================
-def build_report(assets):
-    text = "📊 ASSET ATTIVI (AUTO-OTTIMIZZATI)\n"
+def build_alerts(assets):
+    text = "🚨 **SEGNALI AI FORTI**\n\n"
+    found = False
+
     for a in assets:
-        text += f"• {a}\n"
-    return text
+        close = get_data(a)
+        if close is None:
+            continue
+
+        score = calculate_score(close)
+        if score >= 70:
+            found = True
+            text += f"✅ {a} → SCORE {score}/100\n"
+
+    return text if found else None
 
 # ================= MAIN =================
 async def main():
@@ -77,19 +99,18 @@ async def main():
     bot = Bot(token=TOKEN)
     assets = load_assets()
 
-    # Domenica → ottimizza
+    # Domenica → ottimizzazione lista
     if datetime.now().weekday() == 6:
         assets = optimize_assets(assets)
         save_assets(assets)
         await bot.send_message(
             chat_id=CHAT_ID,
-            text="🧠 Ottimizzazione completata"
+            text="🧠 Ottimizzazione settimanale completata"
         )
 
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        text=build_report(assets)
-    )
+    alerts = build_alerts(assets)
+    if alerts:
+        await bot.send_message(chat_id=CHAT_ID, text=alerts)
 
 if __name__ == "__main__":
     asyncio.run(main())
