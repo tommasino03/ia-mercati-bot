@@ -1,9 +1,9 @@
-name: IA Mercati Bot
+name: Telegram Market Bot
 
 on:
   schedule:
-    - cron: "0 9 * * *"   # ogni giorno alle 09:00
-  workflow_dispatch:
+    - cron: "0 9 * * *"   # ogni giorno alle 09:00 (ora UTC)
+  workflow_dispatch:     # avvio manuale
 
 jobs:
   run-bot:
@@ -20,12 +20,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install yfinance pandas python-telegram-bot==20.8 matplotlib
+          python -m pip install --upgrade pip
+          pip install yfinance pandas python-telegram-bot==20.7
 
       - name: Run bot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python bot.py
+        run: |
+          python bot.py
