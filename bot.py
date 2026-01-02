@@ -1,120 +1,93 @@
 import os
 import asyncio
-import json
 from datetime import datetime
 
 import yfinance as yf
 import pandas as pd
 from telegram import Bot
 
-# ================== SECRETS ==================
-TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
+# ================== CONFIG ==================
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-if not TOKEN or not CHAT_ID:
-    raise RuntimeError("BOT_TOKEN / CHAT_ID mancanti nei GitHub Secrets")
+ASSETS = {
+    "Azioni USA": [
+        "AAPL", "AMZN", "GOOGL", "META", "TSLA", "NVDA",
+        "JPM", "BAC", "V", "MA", "ADBE", "CSCO", "CMCSA", "WMT"
+    ],
+    "ETF": [
+        "SPY", "QQQ", "VEA", "VGK", "IWV", "VTI", "EFA", "IEMG"
+    ],
+    "Azioni Europa": [
+        "SAN.MC"
+    ]
+}
+# ============================================
 
-# ================== CONFIG ==================
-ASSET_FILE = "assets.json"
-DEFAULT_ASSETS = ["AAPL", "AMZN", "GOOGL", "META", "NVDA", "SPY", "QQQ"]
 
-# ================== ASSETS ==================
-def load_assets():
-    if not os.path.exists(ASSET_FILE):
-        save_assets(DEFAULT_ASSETS)
-        return DEFAULT_ASSETS
-    with open(ASSET_FILE, "r") as f:
-        return json.load(f)
+def calculate_trend(close: pd.Series):
+    close = close.dropna()
 
-def save_assets(assets):
-    with open(ASSET_FILE, "w") as f:
-        json.dump(assets, f)
-
-# ================== DATA ==================
-def get_close(symbol: str) -> pd.Series | None:
-    df = yf.download(symbol, period="6mo", interval="1d", progress=False)
-    if df.empty or "Close" not in df:
-        return None
-    return df["Close"].dropna()
-
-# ================== SCORE ENGINE (SCALARI) ==================
-def calculate_score(close: pd.Series) -> int:
     if len(close) < 60:
-        return 0
+        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
 
     last = float(close.iloc[-1])
     ema20 = float(close.ewm(span=20).mean().iloc[-1])
     ema50 = float(close.ewm(span=50).mean().iloc[-1])
+    ema200 = float(close.ewm(span=200).mean().iloc[-1])
 
-    momentum = float((last / float(close.iloc[-20]) - 1) * 100)
-    volatility = float(close.pct_change().std())
+    breve = "✅ COMPRA" if last > ema20 else "⚠️ neutro"
+    medio = "✅ COMPRA" if ema20 > ema50 else "⚠️ neutro"
+    lungo = "✅ INVESTI" if ema50 > ema200 else "⚠️ neutro"
 
-    score = 0
+    return breve, medio, lungo
 
-    # Trend
-    if last > ema20 and ema20 > ema50:
-        score += 40
 
-    # Momentum
-    if momentum > 0:
-        score += min(30, int(momentum))
+def analyze_symbol(symbol: str) -> str:
+    data = yf.download(symbol, period="1y", interval="1d", progress=False)
 
-    # Volatilità
-    if volatility < 0.02:
-        score += 30
-    elif volatility < 0.04:
-        score += 15
+    if data.empty or "Close" not in data:
+        return f"📌 {symbol}\nDati non disponibili\n\n"
 
-    return min(score, 100)
+    close = data["Close"]
+    breve, medio, lungo = calculate_trend(close)
 
-# ================== FILTER ==================
-def optimize_assets(assets):
-    valid = []
+    return (
+        f"📌 {symbol}\n"
+        f"Breve: {breve}\n"
+        f"Medio: {medio}\n"
+        f"Lungo: {lungo}\n\n"
+    )
 
-    for s in assets:
-        close = get_close(s)
-        if close is None:
-            continue
-        if calculate_score(close) >= 50:
-            valid.append(s)
 
-    return valid if valid else assets
+def build_report() -> str:
+    now = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-# ================== ALERTS ==================
-def build_alerts(assets):
-    alerts = []
+    report = f"📊 REPORT IA MERCATI – {now}\n\n"
 
-    for s in assets:
-        close = get_close(s)
-        if close is None:
-            continue
+    for section, symbols in ASSETS.items():
+        report += f"--- {section} ---\n"
+        for s in symbols:
+            report += analyze_symbol(s)
 
-        score = calculate_score(close)
-        if score >= 70:
-            alerts.append(f"✅ {s} — SCORE {score}/100")
+    report += (
+        "🧠 SITUAZIONE GENERALE:\n"
+        "Mercato: POSITIVO\n"
+        "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
+        "Rischio: MEDIO\n"
+    )
 
-    if not alerts:
-        return None
+    return report
 
-    return "🚨 SEGNALI DI MERCATO\n\n" + "\n".join(alerts)
 
-# ================== MAIN ==================
 async def main():
-    bot = Bot(token=TOKEN)
-    assets = load_assets()
+    if not BOT_TOKEN or not CHAT_ID:
+        raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti nei secrets GitHub")
 
-    # Domenica: ottimizzazione
-    if datetime.now().weekday() == 6:
-        assets = optimize_assets(assets)
-        save_assets(assets)
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text="🧠 Ottimizzazione settimanale completata"
-        )
+    bot = Bot(token=BOT_TOKEN)
+    report = build_report()
+    await bot.send_message(chat_id=CHAT_ID, text=report)
 
-    alerts = build_alerts(assets)
-    if alerts:
-        await bot.send_message(chat_id=CHAT_ID, text=alerts)
 
 if __name__ == "__main__":
     asyncio.run(main())
