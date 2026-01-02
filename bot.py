@@ -30,8 +30,7 @@ def calculate_rsi(close, period=14):
     avg_loss = loss.rolling(period).mean()
 
     rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
 
 def calculate_trend(close: pd.Series):
@@ -50,9 +49,7 @@ def calculate_trend(close: pd.Series):
     medio = "✅ COMPRA" if ema20.iloc[-1] > ema50.iloc[-1] else "⚠️ neutro"
     lungo = "✅ INVESTI" if last > ema50.iloc[-1] else "⚠️ neutro"
 
-    rsi_text = f"RSI {round(float(rsi),1)}"
-
-    return breve, medio, lungo, rsi_text
+    return breve, medio, lungo, f"RSI {round(float(rsi),1)}"
 
 
 def analyze_symbol(symbol):
@@ -88,17 +85,34 @@ def build_report():
     report += (
         "🧠 SITUAZIONE GENERALE:\n"
         "Mercato: POSITIVO\n"
-        "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
+        "Strategia: COMPRARE SUI RITRACCIAMENTI\n"
         "Rischio: MEDIO"
     )
 
     return report
 
 
+# ====== SPLIT TELEGRAM ======
+def split_message(text, limit=4000):
+    chunks = []
+    while len(text) > limit:
+        split_index = text.rfind("\n", 0, limit)
+        if split_index == -1:
+            split_index = limit
+        chunks.append(text[:split_index])
+        text = text[split_index:]
+    chunks.append(text)
+    return chunks
+
+
 # ====== MAIN ======
 async def main():
     bot = Bot(token=TOKEN)
-    await bot.send_message(chat_id=CHAT_ID, text=build_report())
+    report = build_report()
+    messages = split_message(report)
+
+    for msg in messages:
+        await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 
 if __name__ == "__main__":
