@@ -1,7 +1,7 @@
 import os
 import asyncio
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import yfinance as yf
 import pandas as pd
@@ -10,23 +10,24 @@ from telegram import Bot
 TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-ASSETS = ["AAPL", "AMZN", "GOOGL", "META", "NVDA", "SPY", "QQQ"]
-STATE_FILE = "signals_state.json"
+ASSET_FILE = "assets.json"
 
-# ================= UTILS =================
-def load_state():
-    try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+DEFAULT_ASSETS = ["AAPL", "AMZN", "GOOGL", "META", "NVDA", "SPY", "QQQ"]
 
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+# ================= ASSET HANDLING =================
+def load_assets():
+    if not os.path.exists(ASSET_FILE):
+        save_assets(DEFAULT_ASSETS)
+        return DEFAULT_ASSETS
+    with open(ASSET_FILE, "r") as f:
+        return json.load(f)
+
+def save_assets(assets):
+    with open(ASSET_FILE, "w") as f:
+        json.dump(assets, f)
 
 # ================= STRATEGY =================
-def signal_from_price(close: pd.Series):
+def signal(close: pd.Series):
     ema20 = close.ewm(span=20).mean()
     ema50 = close.ewm(span=50).mean()
     return (ema20 > ema50).astype(int)
@@ -37,63 +38,58 @@ def backtest(symbol):
         return None
 
     close = data["Close"]
-    signal = signal_from_price(close)
+    sig = signal(close)
 
-    returns = close.pct_change().fillna(0)
-    strat_returns = returns * signal.shift(1).fillna(0)
+    ret = close.pct_change().fillna(0)
+    strat = ret * sig.shift(1).fillna(0)
 
-    cumulative = (1 + strat_returns).prod() - 1
-    buy_hold = (1 + returns).prod() - 1
-    drawdown = (strat_returns.cumsum() - strat_returns.cumsum().cummax()).min()
+    strat_perf = (1 + strat).prod() - 1
+    buy_hold = (1 + ret).prod() - 1
 
-    return {
-        "symbol": symbol,
-        "strategy": round(cumulative * 100, 2),
-        "buy_hold": round(buy_hold * 100, 2),
-        "drawdown": round(drawdown * 100, 2)
-    }
+    return strat_perf, buy_hold
+
+# ================= OPTIMIZATION =================
+def optimize_assets(assets):
+    winners = []
+
+    for s in assets:
+        result = backtest(s)
+        if not result:
+            continue
+        strat, hold = result
+        if strat > hold:
+            winners.append(s)
+
+    return winners if winners else assets
 
 # ================= REPORT =================
-def weekly_backtest_report():
-    results = []
-    for s in ASSETS:
-        r = backtest(s)
-        if r:
-            results.append(r)
-
-    if not results:
-        return "📉 BACKTEST\nNessun dato disponibile."
-
-    text = "📈 BACKTEST STRATEGIA (6 MESI)\n"
-    for r in results:
-        verdict = "✅ BATTE MERCATO" if r["strategy"] > r["buy_hold"] else "❌ SOTTOPERFORMA"
-        text += (
-            f"\n📌 {r['symbol']}\n"
-            f"Strategia: {r['strategy']}%\n"
-            f"Buy & Hold: {r['buy_hold']}%\n"
-            f"Drawdown: {r['drawdown']}%\n"
-            f"Verdetto: {verdict}\n"
-        )
+def build_report(assets):
+    text = "📊 ASSET ATTIVI (AUTO-OTTIMIZZATI)\n"
+    for a in assets:
+        text += f"• {a}\n"
     return text
 
 # ================= MAIN =================
 async def main():
     if not TOKEN or not CHAT_ID:
-        raise RuntimeError("Secrets mancanti")
+        raise RuntimeError("Missing secrets")
 
     bot = Bot(token=TOKEN)
+    assets = load_assets()
 
-    # Giornaliero
-    if datetime.now().weekday() != 6:
+    # Domenica → ottimizza
+    if datetime.now().weekday() == 6:
+        assets = optimize_assets(assets)
+        save_assets(assets)
         await bot.send_message(
             chat_id=CHAT_ID,
-            text="🧠 Bot operativo. Nessuna anomalia rilevata."
+            text="🧠 Ottimizzazione completata"
         )
-        return
 
-    # Domenica → Backtest
-    report = weekly_backtest_report()
-    await bot.send_message(chat_id=CHAT_ID, text=report)
+    await bot.send_message(
+        chat_id=CHAT_ID,
+        text=build_report(assets)
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
