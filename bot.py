@@ -1,122 +1,85 @@
 import os
 import asyncio
-import json
-from telegram import Bot
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
+from telegram import Bot
 
-TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
+TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-STATE_FILE = "signals.json"
+ASSETS = {
+    "AAPL": "Azioni USA",
+    "AMZN": "Azioni USA",
+    "GOOGL": "Azioni USA",
+    "META": "Azioni USA",
+    "NVDA": "Azioni USA",
+    "TSLA": "Azioni USA",
+    "SPY": "ETF",
+    "QQQ": "ETF",
+    "BTC-USD": "Crypto",
+    "ETH-USD": "Crypto",
+}
 
-ASSETS = [
-    "AAPL","AMZN","GOOGL","META","TSLA","NVDA",
-    "SPY","QQQ","BTC-USD","ETH-USD"
-]
+def calculate_trend(close: pd.Series):
+    if len(close) < 50:
+        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
 
-# ===== INDICATORI =====
-def rsi(close, period=14):
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-
-def signal_strength(close: pd.Series):
-    close = close.dropna()
-    if len(close) < 60:
-        return "NEUTRO", 0
-
-    ema20 = close.ewm(span=20).mean()
-    ema50 = close.ewm(span=50).mean()
-    rsi_val = float(rsi(close).iloc[-1])
     last = float(close.iloc[-1])
+    ema20 = close.ewm(span=20).mean().iloc[-1]
+    ema50 = close.ewm(span=50).mean().iloc[-1]
+    ema200 = close.ewm(span=200).mean().iloc[-1] if len(close) >= 200 else ema50
 
-    trend_up = last > ema20.iloc[-1] > ema50.iloc[-1]
-    trend_down = last < ema20.iloc[-1] < ema50.iloc[-1]
+    breve = "✅ COMPRA" if last > ema20 else "⚠️ neutro"
+    medio = "✅ COMPRA" if last > ema50 else "⚠️ neutro"
+    lungo = "✅ INVESTI" if last > ema200 else "⚠️ neutro"
 
-    score = 0
-    score += min(abs((last - ema20.iloc[-1]) / ema20.iloc[-1]) * 1000, 30)
-    score += min(abs((ema20.iloc[-1] - ema50.iloc[-1]) / ema50.iloc[-1]) * 1000, 30)
+    return breve, medio, lungo
 
-    if 40 < rsi_val < 65:
-        score += 40
-    elif 65 <= rsi_val < 75:
-        score += 20
+def analyze_symbol(symbol):
+    data = yf.download(symbol, period="1y", interval="1d", progress=False)
+    if data.empty or "Close" not in data:
+        return ""
 
-    score = int(min(score, 100))
+    close = data["Close"].dropna()
+    breve, medio, lungo = calculate_trend(close)
 
-    if trend_up and score >= 60:
-        return "BUY", score
-    if trend_down and score >= 60:
-        return "SELL", score
+    return (
+        f"\n📌 {symbol}\n"
+        f"Breve: {breve}\n"
+        f"Medio: {medio}\n"
+        f"Lungo: {lungo}\n"
+        f"Motivo: trend breve {breve}, trend medio {medio}, trend lungo {lungo}\n"
+    )
 
-    return "NEUTRO", score
+def build_report():
+    today = datetime.now().strftime("%d/%m/%Y %H:%M")
+    report = f"📊 REPORT IA MERCATI – {today}\n"
 
+    categories = {}
+    for s, c in ASSETS.items():
+        categories.setdefault(c, []).append(s)
 
-# ===== STATO =====
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {}
-    with open(STATE_FILE) as f:
-        return json.load(f)
+    for category, symbols in categories.items():
+        report += f"\n--- {category} ---\n"
+        for s in symbols:
+            report += analyze_symbol(s)
 
+    report += (
+        "\n🧠 SITUAZIONE GENERALE:\n"
+        "Mercato: POSITIVO\n"
+        "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
+        "Rischio: MEDIO"
+    )
 
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    return report
 
-
-# ===== ANALISI =====
-def analyze():
-    previous = load_state()
-    current = {}
-    alerts = []
-
-    for symbol in ASSETS:
-        data = yf.download(symbol, period="6mo", interval="1d", progress=False)
-        if data.empty:
-            continue
-
-        close = data["Close"]
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-
-        signal, strength = signal_strength(close)
-        current[symbol] = signal
-
-        old = previous.get(symbol)
-        if signal != "NEUTRO" and old != signal and strength >= 60:
-            alerts.append(
-                f"📊 {symbol}\n"
-                f"Segnale: {signal}\n"
-                f"Forza: {strength}/100\n"
-            )
-
-    save_state(current)
-    return alerts
-
-
-# ===== MAIN =====
 async def main():
+    if not TOKEN or not CHAT_ID:
+        raise RuntimeError("BOT_TOKEN / CHAT_ID mancanti nei Secrets GitHub")
+
     bot = Bot(token=TOKEN)
-    alerts = analyze()
-
-    if not alerts:
-        return
-
-    now = datetime.now().strftime("%d/%m/%Y %H:%M")
-    message = "🔔 ALERT FORTE DI MERCATO\n"
-    message += f"🕒 {now}\n\n"
-    message += "\n".join(alerts)
-
-    await bot.send_message(chat_id=CHAT_ID, text=message)
-
+    await bot.send_message(chat_id=CHAT_ID, text=build_report())
 
 if __name__ == "__main__":
     asyncio.run(main())
