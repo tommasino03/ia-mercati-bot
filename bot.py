@@ -9,7 +9,6 @@ from telegram import Bot
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-
 STATE_FILE = "state.json"
 
 ASSETS = {
@@ -56,26 +55,37 @@ def calculate_trend(close: pd.Series):
     return breve, medio, lungo
 
 
+def calculate_score(trend_tuple):
+    score = 0
+    breve, medio, lungo = trend_tuple
+    score += 1 if breve == "✅ COMPRA" else 0
+    score += 1 if medio == "✅ COMPRA" else 0
+    score += 1 if lungo == "✅ INVESTI" else 0
+    return score
+
+
 def analyze_symbol(symbol: str, prev_state: dict):
     data = yf.download(symbol, period="1y", interval="1d", progress=False)
 
     if data.empty or "Close" not in data:
-        return None, None
+        return None, None, None
 
-    breve, medio, lungo = calculate_trend(data["Close"])
-    current = {"breve": breve, "medio": medio, "lungo": lungo}
+    trend = calculate_trend(data["Close"])
+    score = calculate_score(trend)
+    current_state = {"breve": trend[0], "medio": trend[1], "lungo": trend[2], "score": score}
 
-    if prev_state.get(symbol) == current:
-        return None, None
+    if prev_state.get(symbol) == current_state:
+        return None, None, None
 
     message = (
         f"📌 {symbol}\n"
-        f"Breve: {breve}\n"
-        f"Medio: {medio}\n"
-        f"Lungo: {lungo}\n\n"
+        f"Breve: {trend[0]}\n"
+        f"Medio: {trend[1]}\n"
+        f"Lungo: {trend[2]}\n"
+        f"Score: {score}/3\n\n"
     )
 
-    return symbol, current, message
+    return symbol, current_state, message
 
 
 async def main():
@@ -89,6 +99,7 @@ async def main():
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
     report = f"📊 ALERT IA MERCATI – {now}\n\n"
     changed = False
+    ranking = []
 
     for section, symbols in ASSETS.items():
         section_text = ""
@@ -99,13 +110,21 @@ async def main():
                 new_state[symbol] = current
                 section_text += msg
                 changed = True
+                ranking.append((symbol, current["score"]))
 
         if section_text:
             report += f"--- {section} ---\n{section_text}"
 
+    # TOP 5 ASSETS
+    if ranking:
+        ranking_sorted = sorted(ranking, key=lambda x: x[1], reverse=True)[:5]
+        report += "--- TOP 5 ASSETS DEL GIORNO ---\n"
+        for sym, score in ranking_sorted:
+            report += f"📌 {sym} → Score: {score}/3\n"
+
     if changed:
         report += (
-            "🧠 STRATEGIA:\n"
+            "\n🧠 STRATEGIA:\n"
             "Segnali aggiornati → valuta ingresso sui ritracciamenti\n"
             "Rischio: MEDIO\n"
         )
