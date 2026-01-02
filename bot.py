@@ -37,17 +37,17 @@ def get_close(symbol: str) -> pd.Series | None:
         return None
     return df["Close"].dropna()
 
-# ================== SCORE ENGINE ==================
+# ================== SCORE ENGINE (SCALARI) ==================
 def calculate_score(close: pd.Series) -> int:
     if len(close) < 60:
         return 0
 
-    last = close.iloc[-1]
-    ema20 = close.ewm(span=20).mean().iloc[-1]
-    ema50 = close.ewm(span=50).mean().iloc[-1]
+    last = float(close.iloc[-1])
+    ema20 = float(close.ewm(span=20).mean().iloc[-1])
+    ema50 = float(close.ewm(span=50).mean().iloc[-1])
 
-    momentum = (last / close.iloc[-20] - 1) * 100
-    volatility = close.pct_change().std()
+    momentum = float((last / float(close.iloc[-20]) - 1) * 100)
+    volatility = float(close.pct_change().std())
 
     score = 0
 
@@ -59,7 +59,7 @@ def calculate_score(close: pd.Series) -> int:
     if momentum > 0:
         score += min(30, int(momentum))
 
-    # Volatilità (VALORE SCALARE)
+    # Volatilità
     if volatility < 0.02:
         score += 30
     elif volatility < 0.04:
