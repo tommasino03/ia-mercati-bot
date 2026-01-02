@@ -19,23 +19,40 @@ ASSETS = {
     "Azioni Europa": ["SAN.MC"]
 }
 
-# ====== ANALISI ======
+# ====== INDICATORI ======
+def calculate_rsi(close, period=14):
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+
 def calculate_trend(close: pd.Series):
     close = pd.to_numeric(close, errors="coerce").dropna()
 
-    if len(close) < 30:
-        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro"
+    if len(close) < 50:
+        return "⚠️ neutro", "⚠️ neutro", "⚠️ neutro", "RSI n.d."
 
     last = float(close.iloc[-1])
-    breve_avg = float(close.iloc[-5:].mean())
-    medio_avg = float(close.iloc[-20:].mean())
-    lungo_avg = float(close.mean())
 
-    breve = "✅ COMPRA" if last > breve_avg else "⚠️ neutro"
-    medio = "✅ COMPRA" if last > medio_avg else "⚠️ neutro"
-    lungo = "✅ INVESTI" if last > lungo_avg else "⚠️ neutro"
+    ema20 = close.ewm(span=20).mean()
+    ema50 = close.ewm(span=50).mean()
+    rsi = calculate_rsi(close).iloc[-1]
 
-    return breve, medio, lungo
+    # ---- LOGICA PROFESSIONALE ----
+    breve = "✅ COMPRA" if last > ema20.iloc[-1] and rsi < 70 else "⚠️ neutro"
+    medio = "✅ COMPRA" if ema20.iloc[-1] > ema50.iloc[-1] else "⚠️ neutro"
+    lungo = "✅ INVESTI" if last > ema50.iloc[-1] else "⚠️ neutro"
+
+    rsi_text = f"RSI {round(rsi,1)}"
+
+    return breve, medio, lungo, rsi_text
 
 
 def analyze_symbol(symbol):
@@ -45,19 +62,17 @@ def analyze_symbol(symbol):
         return ""
 
     close = data["Close"]
-
-    # 🔒 normalizzazione definitiva
     if isinstance(close, pd.DataFrame):
         close = close.iloc[:, 0]
 
-    breve, medio, lungo = calculate_trend(close)
+    breve, medio, lungo, rsi = calculate_trend(close)
 
     return (
         f"📌 {symbol}\n"
         f"Breve: {breve}\n"
         f"Medio: {medio}\n"
         f"Lungo: {lungo}\n"
-        f"Motivo: trend breve {breve}, trend medio {medio}, trend lungo {lungo}, volumi normali\n\n"
+        f"Motivo: trend EMA20/50, {rsi}, volumi normali\n\n"
     )
 
 
