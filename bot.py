@@ -10,8 +10,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 ASSETS = [
     "AAPL","AMZN","GOOGL","META","TSLA","NVDA",
-    "JPM","BAC","V","MA","ADBE","CSCO","WMT",
-    "SPY","QQQ","VTI","VEA","EFA","SAN.MC"
+    "JPM","BAC","V","MA","SPY","QQQ","VTI"
 ]
 
 CSV_FILE = "signals_history.csv"
@@ -27,87 +26,61 @@ def analyze(symbol):
     ma50 = sum(close[-50:]) / 50
 
     score = 0
-    if last > ma20: score += 30
-    if ma20 > ma50: score += 30
-    if last > ma50: score += 30
-    if last > ma20 and ma20 > ma50: score += 10
+    if last > ma20: score += 25
+    if ma20 > ma50: score += 25
+    if last > ma50: score += 20
+    if abs(ma20 - ma50) / ma50 < 0.05: score += 15
 
-    stato = (
-        "FORTE" if score >= 80 else
-        "POSITIVO" if score >= 60 else
-        "NEUTRO" if score >= 40 else
-        "DEBOLE"
+    storico = storico_forte(symbol)
+    if storico >= 3: score += 15
+
+    decisione = (
+        "🟢 COMPRA" if score >= 80 else
+        "🟡 ASPETTA" if score >= 60 else
+        "🔴 EVITA"
     )
 
-    return score, stato
+    return score, decisione
 
-def save_history(date, symbol, score, stato):
+def storico_forte(symbol):
+    if not os.path.isfile(CSV_FILE):
+        return 0
+
+    count = 0
+    with open(CSV_FILE) as f:
+        r = csv.DictReader(f)
+        for row in r:
+            if row["simbolo"] == symbol and int(row["score"]) >= 80:
+                count += 1
+    return count
+
+def save_history(date, symbol, score, decisione):
     exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", newline="") as f:
         w = csv.writer(f)
         if not exists:
-            w.writerow(["data","simbolo","score","stato"])
-        w.writerow([date, symbol, score, stato])
-
-def analyze_history():
-    if not os.path.isfile(CSV_FILE):
-        return "Nessuno storico disponibile."
-
-    stats = {}
-
-    with open(CSV_FILE) as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            s = row["simbolo"]
-            score = int(row["score"])
-            stato = row["stato"]
-
-            if s not in stats:
-                stats[s] = {"count":0,"forti":0,"tot":0}
-
-            stats[s]["count"] += 1
-            stats[s]["tot"] += score
-            if stato == "FORTE":
-                stats[s]["forti"] += 1
-
-    ranking = sorted(
-        stats.items(),
-        key=lambda x: (x[1]["forti"], x[1]["tot"]),
-        reverse=True
-    )
-
-    text = "📈 CLASSIFICA AFFIDABILITÀ (STORICO)\n\n"
-    for sym, d in ranking[:5]:
-        avg = d["tot"] // d["count"]
-        text += (
-            f"🔹 {sym}\n"
-            f"FORTE: {d['forti']} volte\n"
-            f"Score medio: {avg}\n\n"
-        )
-
-    return text
+            w.writerow(["data","simbolo","score","decisione"])
+        w.writerow([date, symbol, score, decisione])
 
 def build_report():
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
-    report = f"📊 REPORT IA MERCATI – {now}\n\n"
-    forti_today = []
+    report = f"💎 IA MERCATI – VERSIONE PREMIUM\n🕒 {now}\n\n"
 
     for symbol in ASSETS:
         res = analyze(symbol)
         if not res:
             continue
 
-        score, stato = res
-        save_history(now, symbol, score, stato)
+        score, decisione = res
+        save_history(now, symbol, score, decisione)
 
-        report += f"📌 {symbol}\nScore: {score}\nStato: {stato}\n\n"
-        if stato == "FORTE":
-            forti_today.append(symbol)
+        report += (
+            f"📌 {symbol}\n"
+            f"Score: {score}/100\n"
+            f"Decisione: {decisione}\n\n"
+        )
 
-    report += "🔥 SEGNALI FORTI OGGI:\n"
-    report += ", ".join(forti_today) if forti_today else "Nessuno"
-
-    report += "\n\n" + analyze_history()
+    report += "⚠️ NON è un consiglio finanziario"
     return report
 
 async def main():
