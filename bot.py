@@ -5,19 +5,22 @@ import pandas as pd
 from fpdf import FPDF
 from telegram import Bot
 
-# Prendi token e chat id dai secrets GitHub Actions
+# Token e chat ID dai secrets
 TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise RuntimeError("Secrets non trovati. Controlla che esistano BOT_TOKEN e CHAT_ID")
+    raise RuntimeError("Secrets non trovati. Controlla BOT_TOKEN e CHAT_ID")
 
-# Lista dei simboli da analizzare
-SYMBOLS = ["AAPL", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM", "BAC", "V", "MA", 
-           "ADBE", "CSCO", "CMCSA", "WMT", "SPY", "QQQ", "VEA", "VGK", "IWV", "VTI", 
-           "EFA", "IEMG", "SAN.MC"]
+# Lista simboli
+SYMBOLS = [
+    "AAPL", "AMZN", "GOOGL", "META", "TSLA", "NVDA",
+    "JPM", "BAC", "V", "MA", "ADBE", "CSCO",
+    "CMCSA", "WMT", "SPY", "QQQ", "VEA", "VGK",
+    "IWV", "VTI", "EFA", "IEMG", "SAN.MC"
+]
 
-# Calcolo trend
+# Calcolo trend sicuro
 def calculate_trend(close: pd.Series):
     if len(close) < 20:
         return "⚠️ dati insufficienti", "⚠️ dati insufficienti", "⚠️ dati insufficienti"
@@ -35,25 +38,29 @@ def calculate_trend(close: pd.Series):
 
 # Analisi di un simbolo
 def analyze_symbol(symbol):
-    data = yf.download(symbol, period="60d", interval="1d")["Close"]
-    breve, medio, lungo = calculate_trend(data)
-    motivo = f"trend breve {breve}, trend medio {medio}, trend lungo {lungo}, volumi normali"
-    report = f"📌 {symbol}\nBreve: {breve}\nMedio: {medio}\nLungo: {lungo}\nMotivo: {motivo}\n\n"
-    return report
+    try:
+        data = yf.download(symbol, period="60d", interval="1d")["Close"]
+        breve, medio, lungo = calculate_trend(data)
+        motivo = f"trend breve {breve}, trend medio {medio}, trend lungo {lungo}, volumi normali"
+        return f"📌 {symbol}\nBreve: {breve}\nMedio: {medio}\nLungo: {lungo}\nMotivo: {motivo}\n\n"
+    except:
+        return f"📌 {symbol} - errore dati\n\n"
 
-# Costruzione report completo
+# Build report
 def build_report():
     report = f"📊 REPORT IA MERCATI – {pd.Timestamp.now():%d/%m/%Y %H:%M}\n\n"
     report += "--- Azioni e ETF ---\n"
-    for symbol in SYMBOLS:
-        try:
-            report += analyze_symbol(symbol)
-        except Exception as e:
-            report += f"📌 {symbol} - errore dati\n\n"
-    report += "🧠 SITUAZIONE GENERALE:\nMercato: POSITIVO\nStrategia consigliata: COMPRARE SUI RITRACCIAMENTI\nRischio: MEDIO\n"
+    for s in SYMBOLS:
+        report += analyze_symbol(s)
+    report += (
+        "🧠 SITUAZIONE GENERALE:\n"
+        "Mercato: POSITIVO\n"
+        "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
+        "Rischio: MEDIO\n"
+    )
     return report
 
-# Creazione PDF semplice
+# PDF semplice
 def create_pdf(report_text, filename="report.pdf"):
     pdf = FPDF()
     pdf.add_page()
@@ -69,6 +76,6 @@ async def main():
     create_pdf(report_text)
     await bot.send_message(chat_id=CHAT_ID, text=report_text)
 
-# Entry point
+# Entry
 if __name__ == "__main__":
     asyncio.run(main())
