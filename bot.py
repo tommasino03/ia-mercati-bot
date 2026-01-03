@@ -7,60 +7,74 @@ import yfinance as yf
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-ASSETS_USA = ["AAPL", "AMZN", "GOOGL", "META", "TSLA", "NVDA"]
-ETFS = ["SPY", "QQQ"]
+AZIONI_USA = [
+    "AAPL", "AMZN", "GOOGL", "META", "TSLA", "NVDA",
+    "JPM", "BAC", "V", "MA", "ADBE", "CSCO", "CMCSA", "WMT"
+]
+
+ETFS = ["SPY", "QQQ", "VEA", "VGK", "IWV", "VTI", "EFA", "IEMG"]
 EUROPA = ["SAN.MC"]
 
 def analyze(symbol):
-    data = yf.download(symbol, period="6mo", interval="1d", progress=False)
+    df = yf.download(symbol, period="6mo", interval="1d", progress=False)
 
-    if data.empty or len(data) < 50:
-        return f"📌 {symbol}\nDati insufficienti\n\n"
+    if df.empty or len(df) < 60:
+        return f"📌 {symbol}\nDati insufficienti\n\n", 0
 
-    close = data["Close"].tolist()
-
+    close = df["Close"].tolist()
     last = close[-1]
     ma20 = sum(close[-20:]) / 20
     ma50 = sum(close[-50:]) / 50
 
-    breve = "✅ COMPRA" if last > ma20 else "⚠️ neutro"
-    medio = "✅ COMPRA" if ma20 > ma50 else "⚠️ neutro"
-    lungo = "✅ INVESTI" if last > ma50 else "⚠️ neutro"
+    score = 0
+    if last > ma20:
+        score += 30
+    if ma20 > ma50:
+        score += 30
+    if last > ma50:
+        score += 30
+    if last > ma20 and ma20 > ma50:
+        score += 10
+
+    if score >= 80:
+        rating = "🔥 SEGNALE FORTE"
+    elif score >= 60:
+        rating = "✅ POSITIVO"
+    elif score >= 40:
+        rating = "⚠️ NEUTRO"
+    else:
+        rating = "❌ DEBOLE"
 
     return f"""📌 {symbol}
-Breve: {breve}
-Medio: {medio}
-Lungo: {lungo}
-"""
+Score: {score}/100
+Valutazione: {rating}
+
+""", score
 
 def build_report():
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
     report = f"📊 REPORT IA MERCATI – {now}\n\n"
 
-    report += "--- Azioni USA ---\n"
-    for s in ASSETS_USA:
-        report += analyze(s)
+    forti = []
 
-    report += "\n--- ETF ---\n"
-    for s in ETFS:
-        report += analyze(s)
+    for titolo in AZIONI_USA + ETFS + EUROPA:
+        testo, score = analyze(titolo)
+        report += testo
+        if score >= 80:
+            forti.append(titolo)
 
-    report += "\n--- Azioni Europa ---\n"
-    for s in EUROPA:
-        report += analyze(s)
+    report += "\n🔥 SEGNALI FORTI DEL GIORNO:\n"
+    report += ", ".join(forti) if forti else "Nessuno"
 
-    report += """
-🧠 SITUAZIONE GENERALE:
-Mercato: POSITIVO
-Strategia consigliata: COMPRARE SUI RITRACCIAMENTI
-Rischio: MEDIO
-"""
+    report += (
+        "\n\n🧠 STRATEGIA:\n"
+        "Entrare solo sui titoli con score ≥ 80\n"
+        "Rischio: MEDIO\n"
+    )
+
     return report
 
 async def main():
-    if not BOT_TOKEN or not CHAT_ID:
-        raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti")
-
     bot = Bot(token=BOT_TOKEN)
     await bot.send_message(chat_id=CHAT_ID, text=build_report())
 
