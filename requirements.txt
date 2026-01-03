@@ -1,7 +1,6 @@
-python-telegram-bot==20.4
+numpy==1.25.3
 pandas==2.1.1
 yfinance==0.2.27
+python-telegram-bot==20.4
 fpdf==1.7.2
-
-
 
