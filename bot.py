@@ -4,7 +4,7 @@ import yfinance as yf
 import pandas as pd
 from telegram import Bot
 
-# Leggi token e chat id dai secrets
+# Leggi token e chat id dai Secrets
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
@@ -17,7 +17,7 @@ bot = Bot(token=TELEGRAM_TOKEN)
 symbols = ["AAPL", "TSLA", "MSFT"]
 
 def calculate_trend(close):
-    # Risolve i FutureWarning convertendo Series a float
+    # Risolve FutureWarning convertendo Series a float
     last = float(close.iloc[-1])
     ema20 = float(close.ewm(span=20).mean().iloc[-1])
     ema50 = float(close.ewm(span=50).mean().iloc[-1])
