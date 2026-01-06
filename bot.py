@@ -1,51 +1,58 @@
-import asyncio
 import os
-import yfinance as yf
-import pandas as pd
+import requests
 from telegram import Bot
 
-TOKEN = os.getenv("BOT_TOKEN")
+# =========================
+# CONFIG
+# =========================
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-if not TOKEN or not CHAT_ID:
-    raise RuntimeError("BOT_TOKEN o CHAT_ID mancanti")
+SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
 
-SYMBOLS = ["AAPL", "MSFT", "GOOGL"]
+# =========================
+# FUNZIONI
+# =========================
+def get_price(symbol):
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
+    r = requests.get(url, timeout=10)
+    data = r.json()
 
-def analyze_symbol(symbol: str) -> str:
-    df = yf.download(symbol, period="3mo", interval="1d", progress=False)
+    result = data["quoteResponse"]["result"]
+    if not result:
+        return None
 
-    if df.empty or len(df) < 50:
-        return f"{symbol}: dati insufficienti\n\n"
+    price = result[0].get("regularMarketPrice")
+    change = result[0].get("regularMarketChangePercent")
 
-    close = df["Close"]
+    return price, change
 
-    price = float(close.iloc[-1])
-    ema20 = float(close.ewm(span=20).mean().iloc[-1])
-    ema50 = float(close.ewm(span=50).mean().iloc[-1])
-    momentum = (price / float(close.iloc[-20]) - 1) * 100
 
-    breve = "✅ COMPRA" if price > ema20 else "⚠️ neutro"
-    medio = "✅ COMPRA" if ema20 > ema50 else "⚠️ neutro"
-    lungo = "✅ COMPRA" if momentum > 0 else "⚠️ neutro"
+def main():
+    bot = Bot(token=TELEGRAM_TOKEN)
 
-    return (
-        f"{symbol}\n"
-        f"• Trend breve: {breve}\n"
-        f"• Trend medio: {medio}\n"
-        f"• Trend lungo: {lungo}\n\n"
-    )
-
-def build_report() -> str:
-    report = "📊 Report Mercati\n\n"
+    messages = []
     for symbol in SYMBOLS:
-        report += analyze_symbol(symbol)
-    return report
+        data = get_price(symbol)
+        if not data:
+            continue
 
-async def main():
-    bot = Bot(token=TOKEN)
-    report = build_report()
-    await bot.send_message(chat_id=CHAT_ID, text=report)
+        price, change = data
+
+        # Condizione semplice (step 2 automatico)
+        if change is not None and abs(change) >= 1:
+            messages.append(
+                f"📊 {symbol}\n"
+                f"💰 Prezzo: {price}\n"
+                f"📈 Variazione: {round(change, 2)}%\n"
+            )
+
+    if messages:
+        final_message = "📢 **Segnali di mercato**\n\n" + "\n".join(messages)
+        bot.send_message(chat_id=CHAT_ID, text=final_message)
+    else:
+        print("Nessun segnale rilevante oggi.")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
