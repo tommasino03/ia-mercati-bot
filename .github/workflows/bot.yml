@@ -1,30 +1,26 @@
-name: Run IA Mercati Bot
+name: Run Telegram Bot
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
-    env:
-      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-      CHAT_ID: ${{ secrets.CHAT_ID }}
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.12
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.12
 
-    - name: Upgrade pip
-      run: pip install --upgrade pip
+      - name: Install dependencies
+        run: pip install --upgrade pip && pip install -r requirements.txt
 
-    - name: Install dependencies
-      run: pip install --no-cache-dir -r requirements.txt
-
-    - name: Run Bot
-      run: python bot.py
+      - name: Run bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python bot.py
