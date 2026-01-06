@@ -1,22 +1,22 @@
 name: Telegram Bot
 
 on:
-  schedule:
-    - cron: "0 8 * * 1-5"
   workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"  # ogni 6 ore
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
