@@ -1,46 +1,44 @@
 import os
-import asyncio
 import yfinance as yf
 import pandas as pd
 from telegram import Bot
 
-# Leggi token e chat id dai Secrets
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
+# Ottieni token e chat_id dai secrets
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 if not TELEGRAM_TOKEN or not CHAT_ID:
     raise ValueError("TELEGRAM_TOKEN o CHAT_ID mancanti nei Secrets")
 
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# Lista dei simboli da analizzare
-symbols = ["AAPL", "TSLA", "MSFT"]
+def calculate_score(df):
+    df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+    df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+    last = df["Close"].iloc[-1]
+    ema20 = df["EMA20"].iloc[-1]
+    ema50 = df["EMA50"].iloc[-1]
 
-def calculate_trend(close):
-    # Risolve FutureWarning convertendo Series a float
-    last = float(close.iloc[-1])
-    ema20 = float(close.ewm(span=20).mean().iloc[-1])
-    ema50 = float(close.ewm(span=50).mean().iloc[-1])
+    if last > ema20 > ema50:
+        return "BUY"
+    elif last < ema20 < ema50:
+        return "SELL"
+    else:
+        return "HOLD"
 
-    breve = "✅ COMPRA" if last > ema20 else "⚠️ NEUTRO"
-    medio = "📈 TENDENZA RIALZISTA" if ema20 > ema50 else "📉 TENDENZA RIBASSISTA"
-    return breve, medio
+def build_alerts(assets):
+    alerts = []
+    for asset in assets:
+        df = yf.download(asset, period="60d", interval="1d")
+        score = calculate_score(df)
+        alerts.append(f"{asset}: {score}")
+    return alerts
 
-def analyze_symbol(symbol):
-    data = yf.download(symbol, period="2mo", interval="1d")
-    close = data['Close']
-    breve, medio = calculate_trend(close)
-    return f"{symbol}: {breve} | {medio}"
-
-def build_report():
-    report = ""
-    for s in symbols:
-        report += analyze_symbol(s) + "\n"
-    return report
-
-async def main():
-    report = build_report()
-    await bot.send_message(chat_id=CHAT_ID, text=report)
+def main():
+    assets = ["AAPL", "TSLA", "MSFT"]  # esempio, puoi modificare
+    alerts = build_alerts(assets)
+    message = "\n".join(alerts)
+    bot.send_message(chat_id=CHAT_ID, text=message)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
