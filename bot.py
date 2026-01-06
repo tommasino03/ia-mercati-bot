@@ -1,44 +1,51 @@
 import os
+import logging
+from telegram import Bot
+from telegram.error import TelegramError
 import yfinance as yf
 import pandas as pd
-from telegram import Bot
 
-# Ottieni token e chat_id dai secrets
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+# Logging base
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-if not TELEGRAM_TOKEN or not CHAT_ID:
-    raise ValueError("TELEGRAM_TOKEN o CHAT_ID mancanti nei Secrets")
+def get_env_variables():
+    TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+    CHAT_ID = os.environ.get("CHAT_ID")
 
-bot = Bot(token=TELEGRAM_TOKEN)
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        # Se le variabili esistono ma sono stringhe vuote o con spazi, pulisco
+        TELEGRAM_TOKEN = TELEGRAM_TOKEN.strip() if TELEGRAM_TOKEN else None
+        CHAT_ID = CHAT_ID.strip() if CHAT_ID else None
 
-def calculate_score(df):
-    df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
-    df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
-    last = df["Close"].iloc[-1]
-    ema20 = df["EMA20"].iloc[-1]
-    ema50 = df["EMA50"].iloc[-1]
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        raise ValueError("TELEGRAM_TOKEN o CHAT_ID mancanti nei Secrets")
+    return TELEGRAM_TOKEN, CHAT_ID
 
-    if last > ema20 > ema50:
-        return "BUY"
-    elif last < ema20 < ema50:
-        return "SELL"
-    else:
-        return "HOLD"
+def send_message(bot, chat_id, text):
+    try:
+        bot.send_message(chat_id=chat_id, text=text)
+        logging.info("Messaggio inviato correttamente")
+    except TelegramError as e:
+        logging.error(f"Errore invio messaggio: {e}")
 
-def build_alerts(assets):
-    alerts = []
-    for asset in assets:
-        df = yf.download(asset, period="60d", interval="1d")
-        score = calculate_score(df)
-        alerts.append(f"{asset}: {score}")
-    return alerts
+def get_stock_info(ticker):
+    data = yf.Ticker(ticker)
+    hist = data.history(period="5d")
+    last_close = hist['Close'][-1]
+    return last_close
 
 def main():
-    assets = ["AAPL", "TSLA", "MSFT"]  # esempio, puoi modificare
-    alerts = build_alerts(assets)
-    message = "\n".join(alerts)
-    bot.send_message(chat_id=CHAT_ID, text=message)
+    TELEGRAM_TOKEN, CHAT_ID = get_env_variables()
+    bot = Bot(token=TELEGRAM_TOKEN)
+
+    # Esempio di messaggio con info azione
+    ticker = "AAPL"
+    last_price = get_stock_info(ticker)
+    message = f"Ultimo prezzo di {ticker}: {last_price}"
+    send_message(bot, CHAT_ID, message)
 
 if __name__ == "__main__":
     main()
