@@ -1,28 +1,32 @@
 name: Run Bot
 
+# Trigger del workflow
 on:
   push:
     branches:
-      - main
+      - main      # esegue su ogni push sul branch main
+  workflow_dispatch:  # permette di eseguirlo manualmente dal tasto "Run workflow"
   schedule:
-    - cron: '0 * * * *' # ogni ora
+    - cron: '0 * * * *'  # opzionale: esegue ogni ora (puoi modificare il cron)
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-    - name: Setup Python
+    - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
+        python-version: 3.12
+
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip
 
     - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      run: pip install -r requirements.txt
 
     - name: Run bot
       env:
