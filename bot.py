@@ -12,13 +12,13 @@ logging.basicConfig(
 )
 
 def get_env_variables():
+    # Legge TELEGRAM_TOKEN e CHAT_ID dai secrets GitHub Actions
     TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
     CHAT_ID = os.environ.get("CHAT_ID")
 
-    if not TELEGRAM_TOKEN or not CHAT_ID:
-        # Se le variabili esistono ma sono stringhe vuote o con spazi, pulisco
-        TELEGRAM_TOKEN = TELEGRAM_TOKEN.strip() if TELEGRAM_TOKEN else None
-        CHAT_ID = CHAT_ID.strip() if CHAT_ID else None
+    # Pulizia degli spazi se presenti
+    TELEGRAM_TOKEN = TELEGRAM_TOKEN.strip() if TELEGRAM_TOKEN else None
+    CHAT_ID = CHAT_ID.strip() if CHAT_ID else None
 
     if not TELEGRAM_TOKEN or not CHAT_ID:
         raise ValueError("TELEGRAM_TOKEN o CHAT_ID mancanti nei Secrets")
@@ -41,7 +41,7 @@ def main():
     TELEGRAM_TOKEN, CHAT_ID = get_env_variables()
     bot = Bot(token=TELEGRAM_TOKEN)
 
-    # Esempio di messaggio con info azione
+    # Esempio di messaggio
     ticker = "AAPL"
     last_price = get_stock_info(ticker)
     message = f"Ultimo prezzo di {ticker}: {last_price}"
