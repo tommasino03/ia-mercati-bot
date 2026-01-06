@@ -13,21 +13,17 @@ if not TELEGRAM_TOKEN or not CHAT_ID:
 
 bot = Bot(token=TELEGRAM_TOKEN)
 
-symbols = ["AAPL", "TSLA", "MSFT"]  # esempio
+# Lista dei simboli da analizzare
+symbols = ["AAPL", "TSLA", "MSFT"]
 
 def calculate_trend(close):
-    # correzione FutureWarning
+    # Risolve i FutureWarning convertendo Series a float
     last = float(close.iloc[-1])
     ema20 = float(close.ewm(span=20).mean().iloc[-1])
     ema50 = float(close.ewm(span=50).mean().iloc[-1])
-    if last > ema20:
-        breve = "✅ COMPRA"
-    else:
-        breve = "⚠️ neutro"
-    if ema20 > ema50:
-        medio = "📈 TENDENZA RIALZISTA"
-    else:
-        medio = "📉 TENDENZA RIBASSISTA"
+
+    breve = "✅ COMPRA" if last > ema20 else "⚠️ NEUTRO"
+    medio = "📈 TENDENZA RIALZISTA" if ema20 > ema50 else "📉 TENDENZA RIBASSISTA"
     return breve, medio
 
 def analyze_symbol(symbol):
