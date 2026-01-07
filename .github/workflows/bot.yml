@@ -1,6 +1,8 @@
-name: Run Bot
+name: Telegram Market Bot
 
 on:
+  schedule:
+    - cron: "0 17 * * *"   # 18:00 italiane (UTC+1)
   workflow_dispatch:
 
 jobs:
@@ -8,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -16,11 +18,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Upgrade pip
-        run: python -m pip install --upgrade pip setuptools wheel
-
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run bot
         env:
