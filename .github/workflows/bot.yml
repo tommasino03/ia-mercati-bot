@@ -1,8 +1,6 @@
-name: Telegram Market Bot
+name: Telegram Bot
 
 on:
-  schedule:
-    - cron: "0 17 * * *"   # 18:00 italiane (UTC+1)
   workflow_dispatch:
 
 jobs:
@@ -10,18 +8,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install python-telegram-bot==20.4
 
       - name: Run bot
         env:
