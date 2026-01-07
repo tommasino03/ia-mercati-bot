@@ -1,22 +1,19 @@
-# bot.py - test invio messaggio Telegram
-
 import os
 from telegram import Bot
+from telegram.error import TelegramError
 
-def main():
-    # Prende token e chat_id dai secrets/variabili d'ambiente
-    token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("CHAT_ID")
+token = os.environ.get("TELEGRAM_TOKEN")
+chat_id = os.environ.get("CHAT_ID")
 
-    if not token or not chat_id:
-        raise ValueError("TELEGRAM_TOKEN o CHAT_ID mancanti nei Secrets")
+if not token or not chat_id:
+    raise ValueError("TELEGRAM_TOKEN o CHAT_ID mancanti nei Secrets")
 
-    bot = Bot(token=token)
+bot = Bot(token=token)
 
-    # Messaggio di test
-    test_message = "✅ Il bot funziona! Messaggio di test."
-    bot.send_message(chat_id=chat_id, text=test_message)
+try:
+    me = bot.get_me()
+    print(f"Bot funzionante: {me.username}")
+    bot.send_message(chat_id=chat_id, text="✅ Test messaggio arrivato!")
     print("Messaggio inviato correttamente!")
-
-if __name__ == "__main__":
-    main()
+except TelegramError as e:
+    print("Errore Telegram:", e)
