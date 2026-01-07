@@ -2,6 +2,8 @@ name: Telegram Bot
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"   # ogni ora
 
 jobs:
   run-bot:
@@ -11,13 +13,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install python-telegram-bot==20.4
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run bot
         env:
