@@ -1,42 +1,39 @@
 import os
-import requests
 import yfinance as yf
+from telegram import Bot
 
-def get_env(name):
-    v = os.getenv(name)
-    return v.strip() if v else ""
+TICKERS = ["AAPL", "MSFT", "TSLA", "GOOGL", "AMZN"]
 
 def main():
-    TELEGRAM_TOKEN = get_env("TELEGRAM_TOKEN")
-    CHAT_ID = get_env("CHAT_ID")
+    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+    CHAT_ID = os.getenv("CHAT_ID")
 
-    ticker = "AAPL"
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        raise ValueError("TELEGRAM_TOKEN o CHAT_ID mancanti nei Secrets")
 
-    try:
-        data = yf.download(
-            ticker,
-            period="5d",
-            interval="1d",
-            progress=False,
-            threads=False
+    bot = Bot(token=TELEGRAM_TOKEN)
+
+    message_lines = ["📊 *Aggiornamento Mercati*\n"]
+
+    for ticker in TICKERS:
+        try:
+            data = yf.download(ticker, period="5d", interval="1d", progress=False)
+
+            if data.empty:
+                continue
+
+            last_price = round(float(data["Close"].iloc[-1]), 2)
+            message_lines.append(f"• {ticker}: ${last_price}")
+
+        except Exception:
+            continue  # ignora ticker problematici, NO crash
+
+    if len(message_lines) > 1:
+        bot.send_message(
+            chat_id=CHAT_ID,
+            text="\n".join(message_lines),
+            parse_mode="Markdown"
         )
-
-        if data.empty:
-            text = f"⚠️ Nessun dato disponibile per {ticker}"
-        else:
-            last_price = round(float(data["Close"].dropna().iloc[-1]), 2)
-            text = f"📈 {ticker} ultimo prezzo: {last_price}$"
-
-    except Exception as e:
-        text = f"❌ Errore nel recupero dati {ticker}"
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text
-    }
-
-    requests.post(url, data=payload, timeout=10)
 
 if __name__ == "__main__":
     main()
