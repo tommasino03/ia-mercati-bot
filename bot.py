@@ -2,37 +2,43 @@ import os
 import yfinance as yf
 from telegram import Bot
 
-TICKERS = ["AAPL", "MSFT", "TSLA", "GOOGL", "AMZN"]
+TICKERS = ["AAPL", "MSFT", "TSLA"]
 
 def main():
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
     CHAT_ID = os.getenv("CHAT_ID")
 
+    # ✅ NON blocchiamo più il bot
     if not TELEGRAM_TOKEN or not CHAT_ID:
-        raise ValueError("TELEGRAM_TOKEN o CHAT_ID mancanti nei Secrets")
+        print("Secrets non disponibili: esecuzione terminata")
+        return
 
     bot = Bot(token=TELEGRAM_TOKEN)
 
-    message_lines = ["📊 *Aggiornamento Mercati*\n"]
+    lines = ["📊 Aggiornamento Mercati"]
 
     for ticker in TICKERS:
         try:
-            data = yf.download(ticker, period="5d", interval="1d", progress=False)
+            data = yf.download(
+                ticker,
+                period="5d",
+                interval="1d",
+                progress=False
+            )
 
             if data.empty:
                 continue
 
-            last_price = round(float(data["Close"].iloc[-1]), 2)
-            message_lines.append(f"• {ticker}: ${last_price}")
+            price = round(float(data["Close"].iloc[-1]), 2)
+            lines.append(f"{ticker}: ${price}")
 
         except Exception:
-            continue  # ignora ticker problematici, NO crash
+            continue
 
-    if len(message_lines) > 1:
+    if len(lines) > 1:
         bot.send_message(
             chat_id=CHAT_ID,
-            text="\n".join(message_lines),
-            parse_mode="Markdown"
+            text="\n".join(lines)
         )
 
 if __name__ == "__main__":
