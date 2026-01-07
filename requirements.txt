@@ -1,12 +1,4 @@
-# Telegram bot
 python-telegram-bot==20.4
-
-# Per dati finanziari
 yfinance==0.2.27
-
-# Elaborazione dati
 pandas==1.5.3
 numpy==1.23.5
-
-# PDF generation se ti serve (come prima)
-fpdf==1.7.2
