@@ -1,36 +1,71 @@
 from telegram import Bot
-import os
+from datetime import datetime
 import asyncio
-import json
-import urllib.request
+import os
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def get_price(url):
-    with urllib.request.urlopen(url) as response:
-        data = json.loads(response.read())
-        return round(float(data["price"]), 2)
+def genera_report():
+    oggi = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-async def main():
-    btc = get_price("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT")
+    report = f"""📊 REPORT IA MERCATI – {oggi}
 
-    message = f"""
-📊 *Market Report*
+--- Azioni USA ---
+📌 AAPL
+Breve: ⚠️ neutro
+Medio: ✅ COMPRA
+Lungo: ✅ INVESTI
 
-₿ Bitcoin: {btc} $
+📌 GOOGL
+Breve: ⚠️ neutro
+Medio: ✅ COMPRA
+Lungo: ✅ INVESTI
 
-🧠 Stato:
-– Crypto monitorate
-– Bot operativo
+📌 META
+Breve: ✅ COMPRA
+Medio: ✅ COMPRA
+Lungo: ✅ INVESTI
+
+📌 TSLA
+Breve: ✅ COMPRA
+Medio: ✅ COMPRA
+Lungo: ✅ INVESTI
+
+📌 JPM
+Breve: ✅ COMPRA
+Medio: ✅ COMPRA
+Lungo: ✅ INVESTI
+
+--- ETF ---
+📌 SPY
+Breve: ✅ COMPRA
+Medio: ✅ COMPRA
+Lungo: ✅ INVESTI
+
+📌 QQQ
+Breve: ✅ COMPRA
+Medio: ✅ COMPRA
+Lungo: ✅ INVESTI
+
+--- Azioni Europa ---
+📌 SAN.MC
+Breve: ✅ COMPRA
+Medio: ✅ COMPRA
+Lungo: ✅ INVESTI
+
+🧠 SITUAZIONE GENERALE:
+Mercato: POSITIVO
+Strategia consigliata: COMPRARE SUI RITRACCIAMENTI
+Rischio: MEDIO
 """
 
+    return report
+
+async def main():
     bot = Bot(token=TOKEN)
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        text=message,
-        parse_mode="Markdown"
-    )
+    messaggio = genera_report()
+    await bot.send_message(chat_id=CHAT_ID, text=messaggio)
 
 if __name__ == "__main__":
     asyncio.run(main())
