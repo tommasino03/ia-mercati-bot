@@ -14,9 +14,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install python-telegram-bot==20.4
+      - name: Install telegram library
+        run: pip install python-telegram-bot==20.4
 
-      - run: python bot.py
+      - name: Run bot
+        run: python bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
