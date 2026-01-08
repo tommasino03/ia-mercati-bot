@@ -1,24 +1,16 @@
+from telegram import Bot
 import os
-import requests
+import asyncio
 
-def main():
-    token = os.getenv("TELEGRAM_TOKEN")
-    chat_id = os.getenv("CHAT_ID")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-    if not token or not chat_id:
-        raise ValueError("Token o Chat ID mancanti")
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-
-    payload = {
-        "chat_id": chat_id,
-        "text": "✅ Bot operativo. Messaggio di test riuscito."
-    }
-
-    response = requests.post(url, data=payload)
-
-    if response.status_code != 200:
-        raise Exception(f"Errore Telegram: {response.text}")
+async def main():
+    bot = Bot(token=TOKEN)
+    await bot.send_message(
+        chat_id=CHAT_ID,
+        text="✅ Bot ATTIVO!\n\nGitHub Actions funziona correttamente."
+    )
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
