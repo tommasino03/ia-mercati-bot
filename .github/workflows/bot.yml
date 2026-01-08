@@ -1,6 +1,8 @@
-name: Telegram Bot Test
+name: Market Bot Telegram
 
 on:
+  schedule:
+    - cron: "0 8 * * *"   # ogni giorno alle 08:00 (ora italiana circa)
   workflow_dispatch:
 
 jobs:
@@ -8,17 +10,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install telegram library
-        run: pip install python-telegram-bot==20.4
+      - name: Install dependencies
+        run: |
+          pip install python-telegram-bot==20.7
 
       - name: Run bot
-        run: python bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          python bot.py
