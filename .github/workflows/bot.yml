@@ -1,27 +1,29 @@
-name: Telegram Bot Test
+name: Daily Telegram Bot
 
 on:
-  workflow_dispatch:
+  schedule:
+    # Esegue ogni giorno alle 9:00 ora italiana (UTC+1)
+    - cron: '0 8 * * *' # GitHub Actions usa UTC, quindi 8 UTC = 9 CET
+  workflow_dispatch: # Permette l'esecuzione manuale
 
 jobs:
-  run-bot:
+  send_daily_report:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install python-telegram-bot==20.7
 
-      - name: Run bot
+      - name: Run Telegram Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
