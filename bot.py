@@ -1,5 +1,5 @@
 import os
-from telegram import Bot
+import requests
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
@@ -8,17 +8,17 @@ def main():
     if not token or not chat_id:
         raise ValueError("Token o Chat ID mancanti")
 
-    bot = Bot(token=token)
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
 
-    message = (
-        "📊 REPORT IA MERCATI\n\n"
-        "✅ Bot attivo\n"
-        "📈 Mercati monitorati correttamente\n"
-        "🕘 Invio di test riuscito\n\n"
-        "Se leggi questo messaggio, il bot FUNZIONA."
-    )
+    payload = {
+        "chat_id": chat_id,
+        "text": "✅ Bot operativo. Messaggio di test riuscito."
+    }
 
-    bot.send_message(chat_id=chat_id, text=message)
+    response = requests.post(url, data=payload)
+
+    if response.status_code != 200:
+        raise Exception(f"Errore Telegram: {response.text}")
 
 if __name__ == "__main__":
     main()
