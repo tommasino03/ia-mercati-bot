@@ -1,79 +1,55 @@
+import os
+import yfinance as yf
+import pandas as pd
 from telegram import Bot
 from datetime import datetime
 
-# Inserisci qui il tuo token e chat ID dai Secrets
-TELEGRAM_TOKEN = "<IL TUO TOKEN>"
-CHAT_ID = "<IL TUO CHAT_ID>"
+# Lista simboli da monitorare
+TICKERS = ["AAPL", "GOOGL", "META", "TSLA", "JPM", "BAC"]
 
-# Liste dei titoli da includere nel report
-azioni_usa = [
-    "AAPL", "GOOGL", "META", "TSLA", "JPM", "BAC",
-    "V", "MA", "ADBE", "CSCO", "CMCSA", "PEP", "KO", "WMT"
-]
+def get_data(ticker):
+    try:
+        data = yf.download(ticker, period="30d", interval="1d")
+        return data
+    except Exception as e:
+        print(f"Errore scaricando {ticker}: {e}")
+        return None
 
-etf = [
-    "SPY", "QQQ", "VEA", "VGK", "IWV", "VTI", "EFA", "IEMG"
-]
+def analyze(ticker, data):
+    if data is None or data.empty:
+        return "⚠️ dati mancanti", "⚠️ dati mancanti", "⚠️ dati mancanti", "Dati non disponibili"
 
-azioni_europa = ["SAN.MC"]
+    close = data["Close"]
+    short_trend = "✅ COMPRA" if close[-5:].mean() > close[-10:-5].mean() else "⚠️ neutro"
+    mid_trend = "✅ COMPRA" if close[-10:].mean() > close[-20:-10].mean() else "⚠️ neutro"
+    long_trend = "✅ INVESTI" if close.mean() > close.mean() else "⚠️ neutro"  # placeholder
+    reason = f"trend breve {short_trend}, trend medio {mid_trend}, trend lungo {long_trend}, volumi normali"
 
-# Trend fissi per ora (puoi cambiare poi con logica dinamica)
-def trend_breve(ticker): return "✅ COMPRA" if ticker != "AAPL" else "⚠️ neutro"
-def trend_medio(ticker): return "✅ COMPRA"
-def trend_lungo(ticker): return "✅ INVESTI"
+    return short_trend, mid_trend, long_trend, reason
 
-def get_daily_report():
-    today = datetime.now().strftime("%d/%m/%Y %H:%M")
-    report = f"📊 REPORT IA MERCATI – {today}\n\n"
-
+def create_report():
+    report = f"📊 REPORT IA MERCATI – {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
     report += "--- Azioni USA ---\n"
-    for ticker in azioni_usa:
-        report += (
-            f"📌 {ticker}\n"
-            f"Breve: {trend_breve(ticker)}\n"
-            f"Medio: {trend_medio(ticker)}\n"
-            f"Lungo: {trend_lungo(ticker)}\n"
-            f"Motivo: trend breve {trend_breve(ticker)}, "
-            f"trend medio {trend_medio(ticker)}, "
-            f"trend lungo {trend_lungo(ticker)}, volumi normali\n\n"
-        )
 
-    report += "--- ETF ---\n"
-    for ticker in etf:
-        report += (
-            f"📌 {ticker}\n"
-            f"Breve: {trend_breve(ticker)}\n"
-            f"Medio: {trend_medio(ticker)}\n"
-            f"Lungo: {trend_lungo(ticker)}\n"
-            f"Motivo: trend breve {trend_breve(ticker)}, "
-            f"trend medio {trend_medio(ticker)}, "
-            f"trend lungo {trend_lungo(ticker)}, volumi normali\n\n"
-        )
+    for ticker in TICKERS:
+        data = get_data(ticker)
+        short, mid, long, reason = analyze(ticker, data)
+        report += f"📌 {ticker}\nBreve: {short}\nMedio: {mid}\nLungo: {long}\nMotivo: {reason}\n\n"
 
-    report += "--- Azioni Europa ---\n"
-    for ticker in azioni_europa:
-        report += (
-            f"📌 {ticker}\n"
-            f"Breve: {trend_breve(ticker)}\n"
-            f"Medio: {trend_medio(ticker)}\n"
-            f"Lungo: {trend_lungo(ticker)}\n"
-            f"Motivo: trend breve {trend_breve(ticker)}, "
-            f"trend medio {trend_medio(ticker)}, "
-            f"trend lungo {trend_lungo(ticker)}, volumi normali\n\n"
-        )
-
-    report += "🧠 SITUAZIONE GENERALE:\n"
-    report += "Mercato: POSITIVO\n"
-    report += "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
-    report += "Rischio: MEDIO\n"
-
+    report += "🧠 SITUAZIONE GENERALE:\nMercato: POSITIVO\nStrategia consigliata: COMPRARE SUI RITRACCIAMENTI\nRischio: MEDIO"
     return report
 
 def main():
+    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+    CHAT_ID = os.getenv("CHAT_ID")
+
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        raise ValueError("Token o Chat ID mancanti nei Secrets")
+
     bot = Bot(token=TELEGRAM_TOKEN)
-    message = get_daily_report()
-    bot.send_message(chat_id=CHAT_ID, text=message)
-    print("✅ Messaggio inviato!")
+    report = create_report()
+    bot.send_message(chat_id=CHAT_ID, text=report)
+    print("Report inviato correttamente!")
 
 if __name__ == "__main__":
     main()
