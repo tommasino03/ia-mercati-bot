@@ -1,20 +1,20 @@
 import os
 import yfinance as yf
-import pandas as pd
 from telegram import Bot
 from datetime import datetime
 
 def main():
-    # Prendi token e chat ID dai secrets
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
     CHAT_ID = os.getenv("CHAT_ID")
 
     if not TELEGRAM_TOKEN or not CHAT_ID:
         raise ValueError("Token o Chat ID mancanti")
 
+    # Assicurati che CHAT_ID sia un intero
+    chat_id = int(CHAT_ID)
+
     bot = Bot(token=TELEGRAM_TOKEN)
 
-    # Lista ticker da monitorare
     tickers = ["AAPL", "GOOGL", "META", "TSLA", "JPM", "BAC"]
 
     report = f"📊 REPORT IA MERCATI – {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
@@ -31,8 +31,7 @@ def main():
         except Exception as e:
             report += f"📌 {ticker} - Errore: {e}\n\n"
 
-    # Invia messaggio Telegram
-    bot.send_message(chat_id=CHAT_ID, text=report)
+    bot.send_message(chat_id=chat_id, text=report)
 
 if __name__ == "__main__":
     main()
