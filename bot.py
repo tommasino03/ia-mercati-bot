@@ -1,12 +1,22 @@
 import os
 import asyncio
+import requests
 from datetime import datetime
 from telegram import Bot
 
 
-# soglie alert (modificabili in futuro)
-BTC_PRICE = 43500
-BTC_ALERT = 43000
+ALERT_PRICE = 43000  # soglia alert BTC
+
+
+def get_btc_price():
+    url = "https://api.coingecko.com/api/v3/simple/price"
+    params = {
+        "ids": "bitcoin",
+        "vs_currencies": "usd"
+    }
+    response = requests.get(url, timeout=10)
+    data = response.json()
+    return float(data["bitcoin"]["usd"])
 
 
 async def main():
@@ -18,19 +28,20 @@ async def main():
 
     bot = Bot(token=token)
 
+    btc_price = get_btc_price()
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     message = (
-        "🚨 **ALERT MERCATO**\n\n"
-        f"🕒 {now}\n\n"
-        f"₿ BTC attuale: ${BTC_PRICE}\n"
-        f"🎯 Soglia alert: ${BTC_ALERT}\n\n"
+        "🚨 **ALERT BITCOIN**\n\n"
+        f"🕒 {now}\n"
+        f"₿ Prezzo BTC: ${btc_price}\n"
+        f"🎯 Soglia: ${ALERT_PRICE}\n\n"
     )
 
-    if BTC_PRICE > BTC_ALERT:
-        message += "✅ **Condizione raggiunta! BTC sopra la soglia** 🚀"
+    if btc_price >= ALERT_PRICE:
+        message += "✅ **BTC sopra la soglia!** 🚀"
     else:
-        message += "⏳ BTC sotto la soglia, nessuna azione."
+        message += "⏳ BTC sotto la soglia"
 
     await bot.send_message(chat_id=chat_id, text=message)
 
