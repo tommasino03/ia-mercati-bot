@@ -1,39 +1,72 @@
 from telegram import Bot
 from datetime import datetime
 
-# Inserisci qui il tuo token e chat ID già presenti nei Secrets
+# Inserisci qui il tuo token e chat ID dai Secrets
 TELEGRAM_TOKEN = "<IL TUO TOKEN>"
 CHAT_ID = "<IL TUO CHAT_ID>"
 
-# Messaggio di esempio fisso (puoi aggiornarlo dinamicamente più avanti)
+# Liste dei titoli da includere nel report
+azioni_usa = [
+    "AAPL", "GOOGL", "META", "TSLA", "JPM", "BAC",
+    "V", "MA", "ADBE", "CSCO", "CMCSA", "PEP", "KO", "WMT"
+]
+
+etf = [
+    "SPY", "QQQ", "VEA", "VGK", "IWV", "VTI", "EFA", "IEMG"
+]
+
+azioni_europa = ["SAN.MC"]
+
+# Trend fissi per ora (puoi cambiare poi con logica dinamica)
+def trend_breve(ticker): return "✅ COMPRA" if ticker != "AAPL" else "⚠️ neutro"
+def trend_medio(ticker): return "✅ COMPRA"
+def trend_lungo(ticker): return "✅ INVESTI"
+
 def get_daily_report():
     today = datetime.now().strftime("%d/%m/%Y %H:%M")
-    report = f"""📊 REPORT IA MERCATI – {today}
+    report = f"📊 REPORT IA MERCATI – {today}\n\n"
 
---- Azioni USA ---
-📌 AAPL
-Breve: ⚠️ neutro
-Medio: ✅ COMPRA
-Lungo: ✅ INVESTI
-Motivo: trend breve ⚠️ neutro, trend medio ✅ COMPRA, trend lungo ✅ INVESTI, volumi normali
+    report += "--- Azioni USA ---\n"
+    for ticker in azioni_usa:
+        report += (
+            f"📌 {ticker}\n"
+            f"Breve: {trend_breve(ticker)}\n"
+            f"Medio: {trend_medio(ticker)}\n"
+            f"Lungo: {trend_lungo(ticker)}\n"
+            f"Motivo: trend breve {trend_breve(ticker)}, "
+            f"trend medio {trend_medio(ticker)}, "
+            f"trend lungo {trend_lungo(ticker)}, volumi normali\n\n"
+        )
 
-📌 GOOGL
-Breve: ⚠️ neutro
-Medio: ✅ COMPRA
-Lungo: ✅ INVESTI
-Motivo: trend breve ⚠️ neutro, trend medio ✅ COMPRA, trend lungo ✅ INVESTI, volumi normali
+    report += "--- ETF ---\n"
+    for ticker in etf:
+        report += (
+            f"📌 {ticker}\n"
+            f"Breve: {trend_breve(ticker)}\n"
+            f"Medio: {trend_medio(ticker)}\n"
+            f"Lungo: {trend_lungo(ticker)}\n"
+            f"Motivo: trend breve {trend_breve(ticker)}, "
+            f"trend medio {trend_medio(ticker)}, "
+            f"trend lungo {trend_lungo(ticker)}, volumi normali\n\n"
+        )
 
-📌 META
-Breve: ✅ COMPRA
-Medio: ✅ COMPRA
-Lungo: ✅ INVESTI
-Motivo: trend breve ✅ COMPRA, trend medio ✅ COMPRA, trend lungo ✅ INVESTI, volumi normali
+    report += "--- Azioni Europa ---\n"
+    for ticker in azioni_europa:
+        report += (
+            f"📌 {ticker}\n"
+            f"Breve: {trend_breve(ticker)}\n"
+            f"Medio: {trend_medio(ticker)}\n"
+            f"Lungo: {trend_lungo(ticker)}\n"
+            f"Motivo: trend breve {trend_breve(ticker)}, "
+            f"trend medio {trend_medio(ticker)}, "
+            f"trend lungo {trend_lungo(ticker)}, volumi normali\n\n"
+        )
 
-🧠 SITUAZIONE GENERALE:
-Mercato: POSITIVO
-Strategia consigliata: COMPRARE SUI RITRACCIAMENTI
-Rischio: MEDIO
-"""
+    report += "🧠 SITUAZIONE GENERALE:\n"
+    report += "Mercato: POSITIVO\n"
+    report += "Strategia consigliata: COMPRARE SUI RITRACCIAMENTI\n"
+    report += "Rischio: MEDIO\n"
+
     return report
 
 def main():
