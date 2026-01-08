@@ -4,6 +4,11 @@ from datetime import datetime
 from telegram import Bot
 
 
+# soglie alert (modificabili in futuro)
+BTC_PRICE = 43500
+BTC_ALERT = 43000
+
+
 async def main():
     token = os.getenv("TELEGRAM_TOKEN")
     chat_id = os.getenv("CHAT_ID")
@@ -15,23 +20,17 @@ async def main():
 
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    # Dati simulati (placeholder sicuro)
-    markets = {
-        "S&P 500": "+0.42%",
-        "NASDAQ": "-0.18%",
-        "BTC": "+1.25%",
-        "ETH": "+0.67%"
-    }
-
-    market_text = "\n".join([f"• {k}: {v}" for k, v in markets.items()])
-
     message = (
-        "📊 **Aggiornamento Mercati**\n\n"
+        "🚨 **ALERT MERCATO**\n\n"
         f"🕒 {now}\n\n"
-        f"{market_text}\n\n"
-        "✅ Bot stabile\n"
-        "🚀 Pronto per automazioni"
+        f"₿ BTC attuale: ${BTC_PRICE}\n"
+        f"🎯 Soglia alert: ${BTC_ALERT}\n\n"
     )
+
+    if BTC_PRICE > BTC_ALERT:
+        message += "✅ **Condizione raggiunta! BTC sopra la soglia** 🚀"
+    else:
+        message += "⏳ BTC sotto la soglia, nessuna azione."
 
     await bot.send_message(chat_id=chat_id, text=message)
 
