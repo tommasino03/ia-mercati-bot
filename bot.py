@@ -1,29 +1,46 @@
 import os
 import datetime
 import asyncio
-
 from telegram import Bot
 
-# =========================================================
-# LETTURA SICURA DEI SECRETS (ANTI-ERRORI)
-# =========================================================
+# =====================================================
+# LETTURA ULTRA-ROBUSTA DEI SECRETS
+# =====================================================
 def get_env():
-    token = os.environ.get("TELEGRAM_TOKEN", "").strip()
-    chat_id = os.environ.get("CHAT_ID", "").strip()
+    possibili_token = [
+        "TELEGRAM_TOKEN",
+        "BOT_TOKEN",
+        "telegram_token",
+        "bot_token"
+    ]
 
-    if not token or not chat_id:
-        raise ValueError("Token o Chat ID mancanti")
+    possibili_chat = [
+        "CHAT_ID",
+        "TELEGRAM_CHAT_ID",
+        "chat_id"
+    ]
+
+    token = ""
+    chat_id = ""
+
+    for k in possibili_token:
+        if os.environ.get(k):
+            token = os.environ.get(k).strip()
+
+    for k in possibili_chat:
+        if os.environ.get(k):
+            chat_id = os.environ.get(k).strip()
 
     return token, chat_id
 
 
-# =========================================================
-# GENERAZIONE REPORT (SENZA LIBRERIE ESTERNE)
-# =========================================================
+# =====================================================
+# REPORT
+# =====================================================
 def genera_report():
-    oggi = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+    ora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    report = f"""📊 REPORT IA MERCATI – {oggi}
+    return f"""📊 REPORT IA MERCATI – {ora}
 
 --- Azioni USA ---
 📌 AAPL
@@ -73,28 +90,27 @@ Mercato: POSITIVO
 Strategia consigliata: COMPRARE SUI RITRACCIAMENTI
 Rischio: MEDIO
 """
-    return report
 
 
-# =========================================================
-# MAIN ASINCRONO (CORRETTO PER python-telegram-bot v20+)
-# =========================================================
+# =====================================================
+# MAIN ASYNC (NON SI BLOCCA MAI)
+# =====================================================
 async def main():
     token, chat_id = get_env()
-    bot = Bot(token=token)
 
+    if not token or not chat_id:
+        print("⚠️ Token o Chat ID non trovati nei Secrets")
+        return
+
+    bot = Bot(token=token)
     messaggio = genera_report()
 
-    await bot.send_message(
-        chat_id=chat_id,
-        text=messaggio
-    )
-
-    print("✅ Messaggio Telegram inviato con successo")
+    await bot.send_message(chat_id=chat_id, text=messaggio)
+    print("✅ Messaggio Telegram inviato")
 
 
-# =========================================================
+# =====================================================
 # AVVIO
-# =========================================================
+# =====================================================
 if __name__ == "__main__":
     asyncio.run(main())
