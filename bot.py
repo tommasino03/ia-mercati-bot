@@ -37,7 +37,6 @@ def calcola_rsi(close, periodi=14):
 # =====================
 def calcola_score(rsi, vol_att, vol_avg, move):
     score = 0
-
     # RSI
     if rsi <= 25:
         score += 40
@@ -45,7 +44,6 @@ def calcola_score(rsi, vol_att, vol_avg, move):
         score += 30
     elif rsi <= 35:
         score += 20
-
     # Volume
     ratio = vol_att / vol_avg if vol_avg > 0 else 0
     if ratio >= 3:
@@ -54,7 +52,6 @@ def calcola_score(rsi, vol_att, vol_avg, move):
         score += 30
     elif ratio >= 1.5:
         score += 20
-
     # Movimento
     if abs(move) >= 5:
         score += 20
@@ -62,7 +59,6 @@ def calcola_score(rsi, vol_att, vol_avg, move):
         score += 15
     elif abs(move) >= 2:
         score += 10
-
     return score
 
 # =====================
@@ -70,7 +66,6 @@ def calcola_score(rsi, vol_att, vol_avg, move):
 # =====================
 def analizza_ticker(ticker):
     df = yf.download(ticker, period="1d", interval="5m", progress=False)
-
     if df.empty or len(df) < 30:
         return None
 
@@ -103,16 +98,25 @@ def analizza_ticker(ticker):
     }
 
 # =====================
-# MAIN
+# MAIN RANKING
 # =====================
 async def main():
-    messaggio = "📊 SCORE DI MERCATO\n\n"
+    risultati = []
 
     for t in TICKERS:
         d = analizza_ticker(t)
-        if not d:
-            continue
+        if d:
+            risultati.append(d)
 
+    if not risultati:
+        await bot.send_message(chat_id=CHAT_ID, text="❌ Nessun dato valido oggi")
+        return
+
+    # Ordina per score decrescente e prendi top 3
+    top3 = sorted(risultati, key=lambda x: x["score"], reverse=True)[:3]
+
+    messaggio = "📊 TOP 3 SEGNALE MERCATO\n\n"
+    for d in top3:
         messaggio += (
             f"{d['ticker']}\n"
             f"Move: {d['move']}%\n"
