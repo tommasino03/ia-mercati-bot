@@ -1,14 +1,17 @@
-name: Bot Telegram
+name: Telegram Bot Automatico
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * *"   # ogni giorno alle 09:00 UTC
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
