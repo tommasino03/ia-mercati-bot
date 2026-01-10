@@ -1,29 +1,26 @@
-name: Telegram Bot Alert Mercati Multi-correlazione
+name: Telegram Bot Intraday Alert
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 9 * * *"   # ogni giorno alle 09:00 UTC
+    - cron: "0 * * * *"   # ogni ora
 
 jobs:
-  run-bot:
+  intraday:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
-          pip install --upgrade pip
-          pip install python-telegram-bot yfinance feedparser matplotlib
+          pip install python-telegram-bot yfinance matplotlib
 
-      - name: Run Telegram bot
+      - name: Run intraday bot
         run: python bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
