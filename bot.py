@@ -1,12 +1,20 @@
 import yfinance as yf
 import asyncio
+import os
 from telegram import Bot
 
-TOKEN = "INSERISCI_TOKEN"
-CHAT_ID = "INSERISCI_CHAT_ID"
+# =====================
+# ENV
+# =====================
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+if not TOKEN or not CHAT_ID:
+    raise ValueError("TOKEN o CHAT_ID mancanti")
+
+bot = Bot(token=TOKEN)
 
 SOGLIA_MOVE = 2.5  # %
-bot = Bot(token=TOKEN)
 
 TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST"]
 
@@ -19,8 +27,8 @@ def intraday_move(ticker):
     if df.empty:
         return None
 
-    open_price = float(df["Open"].iloc[0])
-    last_price = float(df["Close"].iloc[-1])
+    open_price = df["Open"].iloc[0].item()
+    last_price = df["Close"].iloc[-1].item()
 
     move = ((last_price - open_price) / open_price) * 100
     return round(move, 2)
@@ -34,26 +42,24 @@ def segnale_operativo(ticker):
     if df.empty:
         return "NO DATA"
 
-    last = float(df["Close"].iloc[-1])
-    high = float(df["High"].max())
-    low = float(df["Low"].min())
+    last = df["Close"].iloc[-1].item()
+    high = df["High"].max().item()
+    low = df["Low"].min().item()
 
     move = intraday_move(ticker)
     if move is None:
         return "NO DATA"
 
-    # BUY
-    if (last >= high * 0.995) and (move >= SOGLIA_MOVE):
-        return "BUY 🚀 Breakout + Momentum"
+    if last >= high * 0.995 and move >= SOGLIA_MOVE:
+        return "BUY 🚀 Breakout"
 
-    # SELL
-    if (last <= low * 1.005) and (move <= -SOGLIA_MOVE):
+    if last <= low * 1.005 and move <= -SOGLIA_MOVE:
         return "SELL 🔻 Breakdown"
 
     return "HOLD ⏸"
 
 # =====================
-# TELEGRAM BOT
+# MAIN
 # =====================
 async def main():
     messaggio = "📊 SEGNALI DI MERCATO\n\n"
