@@ -1,4 +1,4 @@
-name: Telegram Bot Mercati
+name: Telegram Bot Alert Mercati
 
 on:
   workflow_dispatch:
