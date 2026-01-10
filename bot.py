@@ -3,8 +3,9 @@ import asyncio
 import os
 from telegram import Bot
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import pandas as pd
+from datetime import datetime
+import json
 
 # =====================
 # ENV
@@ -24,6 +25,22 @@ TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST"]
 TICKERS_ANOMALI = ["AMC", "GME", "BB", "KOSS", "NOK"]
 RSI_BUY = 30
 RSI_SELL = 70
+SCORE_FORTISSIMO = 80
+STORAGE_FILE = "storico_segnali.json"
+
+# =====================
+# UTILITIES
+# =====================
+def load_storico():
+    try:
+        with open(STORAGE_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_storico(data):
+    with open(STORAGE_FILE, "w") as f:
+        json.dump(data, f)
 
 # =====================
 # RSI
@@ -41,14 +58,12 @@ def calcola_rsi(close, periodi=14):
 # =====================
 def calcola_score(rsi, vol_att, vol_avg, move):
     score = 0
-    # RSI
     if rsi <= 25:
         score += 40
     elif rsi <= 30:
         score += 30
     elif rsi <= 35:
         score += 20
-    # Volume
     ratio = vol_att / vol_avg if vol_avg > 0 else 0
     if ratio >= 3:
         score += 40
@@ -56,7 +71,6 @@ def calcola_score(rsi, vol_att, vol_avg, move):
         score += 30
     elif ratio >= 1.5:
         score += 20
-    # Movimento
     if abs(move) >= 5:
         score += 20
     elif abs(move) >= 3:
@@ -82,16 +96,13 @@ def analizza_ticker(ticker):
     vol_att = float(df["Volume"].iloc[-1])
     vol_avg = float(df["Volume"].rolling(20).mean().iloc[-1])
 
-    # Media mobile
     ma20 = float(df["Close"].rolling(20).mean().iloc[-1])
     ma50 = float(df["Close"].rolling(50).mean().iloc[-1]) if len(df) >= 50 else ma20
     ma200 = float(df["Close"].rolling(200).mean().iloc[-1]) if len(df) >= 200 else ma20
-
     above_ma = "sopra" if last_p > ma20 else "sotto"
 
     score = calcola_score(rsi, vol_att, vol_avg, move)
-
-    if score >= 80:
+    if score >= SCORE_FORTISSIMO:
         segnale = "🚀 SEGNALE FORTISSIMO"
     elif score >= 60:
         segnale = "✅ BUON SEGNALE"
@@ -133,27 +144,34 @@ def salva_grafico(df, ticker):
     return filename
 
 # =====================
-# MAIN TOP3 + ANOMALI + GRAFICI
+# MAIN
 # =====================
 async def main():
+    storico = load_storico()
     risultati = []
 
     for t in TICKERS + TICKERS_ANOMALI:
         d = analizza_ticker(t)
-        if d:
+        if d and d["score"] >= SCORE_FORTISSIMO:
             risultati.append(d)
 
     if not risultati:
-        await bot.send_message(chat_id=CHAT_ID, text="❌ Nessun dato valido oggi")
+        await bot.send_message(chat_id=CHAT_ID, text="❌ Nessun segnale forte oggi")
         return
 
-    # TOP3 score
+    # Top3 segnali fortissimi
     top3 = sorted(risultati, key=lambda x: x["score"], reverse=True)[:3]
+    messaggio = f"📊 TOP 3 SEGNALE FORTISSIMO - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
 
-    messaggio = "📊 TOP 3 SEGNALE MERCATO\n\n"
     for d in top3:
+        ticker = d["ticker"]
+        # Evita duplicati nello storico
+        if storico.get(ticker) == d["score"]:
+            continue
+        storico[ticker] = d["score"]
+
         messaggio += (
-            f"{d['ticker']}\n"
+            f"{ticker}\n"
             f"Move: {d['move']}%\n"
             f"RSI: {d['rsi']}\n"
             f"SCORE: {d['score']}/100\n"
@@ -161,8 +179,12 @@ async def main():
             f"Prezzo {d['above_ma']} MA20\n\n"
         )
 
-        grafico = salva_grafico(d["df"], d["ticker"])
+        grafico = salva_grafico(d["df"], ticker)
         await bot.send_photo(chat_id=CHAT_ID, photo=open(grafico, "rb"))
+
+    save_storico(storico)
+    if messaggio.strip():
+        await bot.send_message(chat_id=CHAT_ID, text=messaggio)
 
 if __name__ == "__main__":
     asyncio.run(main())
