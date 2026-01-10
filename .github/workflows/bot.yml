@@ -1,4 +1,4 @@
-name: Telegram Bot Alert Mercati
+name: Telegram Bot Alert Mercati Avanzato
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install python-telegram-bot yfinance
+          pip install python-telegram-bot yfinance feedparser
 
       - name: Run Telegram bot
         run: python bot.py
