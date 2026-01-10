@@ -1,5 +1,4 @@
 import yfinance as yf
-import pandas as pd
 import asyncio
 import os
 from telegram import Bot
@@ -19,7 +18,7 @@ bot = Bot(token=TOKEN)
 # CONFIG
 # =====================
 TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST"]
-SOGLIA_MOVE = 2.0          # %
+SOGLIA_MOVE = 2.0
 RSI_BUY = 30
 RSI_SELL = 70
 VOLUME_MULT = 2.0
@@ -27,49 +26,37 @@ VOLUME_MULT = 2.0
 # =====================
 # RSI
 # =====================
-def calcola_rsi(series, periodi=14):
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0).rolling(periodi).mean()
-    loss = -delta.where(delta < 0, 0).rolling(periodi).mean()
+def calcola_rsi(close, periodi=14):
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(periodi).mean()
+    loss = -delta.clip(upper=0).rolling(periodi).mean()
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
-    return rsi.iloc[-1]
+    return float(rsi.iloc[-1])
 
 # =====================
-# INTRADAY MOVE
-# =====================
-def intraday_move(df):
-    open_price = df["Open"].iloc[0].item()
-    last_price = df["Close"].iloc[-1].item()
-    return round(((last_price - open_price) / open_price) * 100, 2)
-
-# =====================
-# ANALISI COMPLETA
+# ANALISI TITOLO
 # =====================
 def analizza_ticker(ticker):
-    df = yf.download(
-        ticker,
-        period="1d",
-        interval="5m",
-        progress=False
-    )
+    df = yf.download(ticker, period="1d", interval="5m", progress=False)
 
-    if df.empty or len(df) < 20:
+    if df.empty or len(df) < 30:
         return None
 
-    move = intraday_move(df)
-    rsi = round(calcola_rsi(df["Close"]), 2)
+    open_price = float(df["Open"].iloc[0])
+    last_price = float(df["Close"].iloc[-1])
+    move = round(((last_price - open_price) / open_price) * 100, 2)
 
-    vol_attuale = df["Volume"].iloc[-1].item()
-    vol_media = df["Volume"].rolling(20).mean().iloc[-1].item()
+    rsi = calcola_rsi(df["Close"])
 
+    vol_attuale = float(df["Volume"].iloc[-1])
+    vol_media = float(df["Volume"].rolling(20).mean().iloc[-1])
     volume_spike = vol_attuale >= vol_media * VOLUME_MULT
 
     segnale = "HOLD ⏸"
 
     if rsi <= RSI_BUY and volume_spike:
         segnale = "🟢 BUY FORTE"
-
     elif rsi >= RSI_SELL and volume_spike:
         segnale = "🔴 SELL FORTE"
 
@@ -89,8 +76,7 @@ async def main():
 
     for ticker in TICKERS:
         dati = analizza_ticker(ticker)
-
-        if dati is None:
+        if not dati:
             continue
 
         messaggio += (
