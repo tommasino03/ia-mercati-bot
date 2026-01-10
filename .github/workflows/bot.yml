@@ -1,4 +1,4 @@
-name: Telegram Bot Automatico
+name: Telegram Bot Mercati
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -19,9 +19,11 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install python-telegram-bot --upgrade
+        run: |
+          pip install --upgrade pip
+          pip install python-telegram-bot yfinance
 
-      - name: Run bot
+      - name: Run Telegram bot
         run: python bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
