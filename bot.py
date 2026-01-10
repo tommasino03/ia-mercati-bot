@@ -13,19 +13,19 @@ print("TOKEN:", "OK" if TOKEN else "MANCANTE")
 print("CHAT_ID:", "OK" if CHAT_ID else "MANCANTE")
 
 # Configurazioni
-SOGLIA_VOLATILITA = 2.0
-GIORNI_MEDIA = 5
-NUM_SMALL_CAP = 10
-SMALL_CAPS = ["PLTR","NIO","RIVN","COIN","LCID","SOFI","AFRM","SNAP","TWLO","FUBO",
-              "MARA","HUT","RIOT","ETSY","DDOG","UBER","LYFT","CRWD","DOCU","SQ"]
+SOGLIA_VOLATILITA = 2.0      # soglia minima % alert
+GIORNI_MEDIA = 5             # giorni per calcolare media storica
+NUM_TOP_VOL = 10             # quante small-cap più volatili considerare
 RSS_FEED = "https://www.coindesk.com/arc/outboundfeeds/rss/"
 KEYWORDS = ["bitcoin", "crypto", "market", "indice"]
 
+# Funzione variazione %
 def variazione_percentuale(df):
     if len(df) < 2:
         return 0
     return round((df["Close"][-1] / df["Close"][-2] - 1) * 100, 2)
 
+# Controllo anomalia rispetto media storica
 def controllo_anomalia(ticker):
     df = yf.Ticker(ticker).history(period=f"{GIORNI_MEDIA+1}d")
     if len(df) < 2:
@@ -36,6 +36,7 @@ def controllo_anomalia(ticker):
         return oggi
     return None
 
+# Controllo notizie RSS
 def check_news():
     feed = feedparser.parse(RSS_FEED)
     alerts = []
@@ -45,14 +46,25 @@ def check_news():
                 alerts.append(f"📰 {entry.title}\n{entry.link}")
     return alerts
 
+# Small-cap automatiche: selezione top-N più volatili
 def small_cap_alerts():
-    alert = {}
-    for ticker in SMALL_CAPS[:NUM_SMALL_CAP]:
+    # Lista esempio di small-cap US (puoi usare ETF Russell 2000)
+    SMALL_CAPS = [
+        "PLTR","NIO","RIVN","COIN","LCID","SOFI","AFRM","SNAP","TWLO","FUBO",
+        "MARA","HUT","RIOT","ETSY","DDOG","UBER","LYFT","CRWD","DOCU","SQ",
+        "GME","AMC","SNDL","KOSS","BB","BARK","ZNGA","SPCE","VYGR","FCEL"
+    ]
+    # Calcolo variazioni odierne
+    vol_dict = {}
+    for ticker in SMALL_CAPS:
         val = controllo_anomalia(ticker)
         if val is not None:
-            alert[ticker] = val
-    return alert
+            vol_dict[ticker] = val
+    # Ordina per valore assoluto e prendi top-N
+    top_vol = dict(sorted(vol_dict.items(), key=lambda x: abs(x[1]), reverse=True)[:NUM_TOP_VOL])
+    return top_vol
 
+# Crea grafico small-cap
 def crea_grafico_small_cap(alerts):
     tickers = list(alerts.keys())
     valori = [alerts[t] for t in tickers]
@@ -60,7 +72,7 @@ def crea_grafico_small_cap(alerts):
     bars = plt.bar(tickers, valori, color=['green' if v>0 else 'red' for v in valori])
     plt.axhline(0, color='black', linewidth=0.8)
     plt.ylabel("Variazione %")
-    plt.title("Small-cap più volatili oggi")
+    plt.title("Top Small-cap più volatili oggi")
     for bar, val in zip(bars, valori):
         height = bar.get_height()
         plt.text(bar.get_x() + bar.get_width()/2, height + (0.2 if height>0 else -0.7),
@@ -89,15 +101,13 @@ async def main():
                 simbolo = "⬆️" if val>0 else "⬇️"
                 msg += f"{nome}: {simbolo} {val}%\n"
 
-        # Small-cap
+        # Small-cap automatiche
         small_alert = small_cap_alerts()
         if small_alert:
             alert_flag = True
             for t, v in small_alert.items():
                 simbolo = "⬆️" if v>0 else "⬇️"
                 msg += f"{t}: {simbolo} {v}%\n"
-
-            # Grafico
             grafico = crea_grafico_small_cap(small_alert)
         else:
             grafico = None
