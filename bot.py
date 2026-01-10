@@ -18,6 +18,7 @@ bot = Bot(token=TOKEN)
 # CONFIG
 # =====================
 TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST"]
+TICKERS_ANOMALI = ["AMC", "GME", "BB", "KOSS", "NOK"]  # piccole/volatili
 RSI_BUY = 30
 RSI_SELL = 70
 
@@ -62,7 +63,7 @@ def calcola_score(rsi, vol_att, vol_avg, move):
     return score
 
 # =====================
-# ANALISI
+# ANALISI TICKER
 # =====================
 def analizza_ticker(ticker):
     df = yf.download(ticker, period="1d", interval="5m", progress=False)
@@ -98,12 +99,12 @@ def analizza_ticker(ticker):
     }
 
 # =====================
-# MAIN RANKING
+# MAIN RANKING TOP3 + ANOMALI
 # =====================
 async def main():
     risultati = []
 
-    for t in TICKERS:
+    for t in TICKERS + TICKERS_ANOMALI:
         d = analizza_ticker(t)
         if d:
             risultati.append(d)
@@ -115,7 +116,7 @@ async def main():
     # Ordina per score decrescente e prendi top 3
     top3 = sorted(risultati, key=lambda x: x["score"], reverse=True)[:3]
 
-    messaggio = "📊 TOP 3 SEGNALE MERCATO\n\n"
+    messaggio = "📊 TOP 3 + TITOLO ANOMALO\n\n"
     for d in top3:
         messaggio += (
             f"{d['ticker']}\n"
