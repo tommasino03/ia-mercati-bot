@@ -1,4 +1,4 @@
-name: Telegram Bot Alert Mercati Definitivo
+name: Telegram Bot Alert Mercati Multi-correlazione
 
 on:
   workflow_dispatch:
