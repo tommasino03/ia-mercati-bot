@@ -4,6 +4,7 @@ from datetime import datetime
 from telegram import Bot
 import yfinance as yf
 import feedparser
+import matplotlib.pyplot as plt
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -12,26 +13,19 @@ print("TOKEN:", "OK" if TOKEN else "MANCANTE")
 print("CHAT_ID:", "OK" if CHAT_ID else "MANCANTE")
 
 # Configurazioni
-SOGLIA_VOLATILITA = 2.0  # percentuale minima per alert
-GIORNI_MEDIA = 5          # giorni per calcolare la media storica
-NUM_SMALL_CAP = 10        # quante azioni minori considerare
-
-# Lista di azioni US "small cap" comuni
-SMALL_CAPS = [
-    "PLTR","NIO","RIVN","COIN","LCID","SOFI","AFRM","SNAP","TWLO","FUBO",
-    "MARA","HUT","RIOT","ETSY","DDOG","UBER","LYFT","CRWD","DOCU","SQ"
-]
-
-RSS_FEED = "https://www.coindesk.com/arc/outboundfeeds/rss/"  # feed notizie crypto/mercati
+SOGLIA_VOLATILITA = 2.0
+GIORNI_MEDIA = 5
+NUM_SMALL_CAP = 10
+SMALL_CAPS = ["PLTR","NIO","RIVN","COIN","LCID","SOFI","AFRM","SNAP","TWLO","FUBO",
+              "MARA","HUT","RIOT","ETSY","DDOG","UBER","LYFT","CRWD","DOCU","SQ"]
+RSS_FEED = "https://www.coindesk.com/arc/outboundfeeds/rss/"
 KEYWORDS = ["bitcoin", "crypto", "market", "indice"]
 
-# Funzione variazione percentuale
 def variazione_percentuale(df):
     if len(df) < 2:
         return 0
     return round((df["Close"][-1] / df["Close"][-2] - 1) * 100, 2)
 
-# Controllo anomalia rispetto alla media storica
 def controllo_anomalia(ticker):
     df = yf.Ticker(ticker).history(period=f"{GIORNI_MEDIA+1}d")
     if len(df) < 2:
@@ -42,25 +36,40 @@ def controllo_anomalia(ticker):
         return oggi
     return None
 
-# Controllo notizie
 def check_news():
     feed = feedparser.parse(RSS_FEED)
     alerts = []
-    for entry in feed.entries[:5]:  # ultime 5 notizie
+    for entry in feed.entries[:5]:
         for kw in KEYWORDS:
             if kw.lower() in entry.title.lower():
                 alerts.append(f"📰 {entry.title}\n{entry.link}")
     return alerts
 
-# Selezione small cap più volatile oggi
 def small_cap_alerts():
     alert = {}
     for ticker in SMALL_CAPS[:NUM_SMALL_CAP]:
         val = controllo_anomalia(ticker)
         if val is not None:
-            simbolo = "⬆️" if val > 0 else "⬇️"
-            alert[ticker] = f"{simbolo} {val}%"
+            alert[ticker] = val
     return alert
+
+def crea_grafico_small_cap(alerts):
+    tickers = list(alerts.keys())
+    valori = [alerts[t] for t in tickers]
+    plt.figure(figsize=(10,6))
+    bars = plt.bar(tickers, valori, color=['green' if v>0 else 'red' for v in valori])
+    plt.axhline(0, color='black', linewidth=0.8)
+    plt.ylabel("Variazione %")
+    plt.title("Small-cap più volatili oggi")
+    for bar, val in zip(bars, valori):
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, height + (0.2 if height>0 else -0.7),
+                 f"{val}%", ha='center', color='black', fontsize=9)
+    file_png = "/tmp/smallcap_alert.png"
+    plt.tight_layout()
+    plt.savefig(file_png)
+    plt.close()
+    return file_png
 
 async def main():
     if not TOKEN or not CHAT_ID:
@@ -71,37 +80,45 @@ async def main():
     alert_flag = False
 
     try:
-        # Principali: BTC, S&P500, Nasdaq
-        principali = {"₿ Bitcoin": "BTC-USD", "📈 S&P 500": "^GSPC", "💻 Nasdaq": "^IXIC"}
+        # Principali
+        principali = {"₿ Bitcoin":"BTC-USD","📈 S&P 500":"^GSPC","💻 Nasdaq":"^IXIC"}
         for nome, ticker in principali.items():
             val = controllo_anomalia(ticker)
             if val is not None:
                 alert_flag = True
-                simbolo = "⬆️" if val > 0 else "⬇️"
+                simbolo = "⬆️" if val>0 else "⬇️"
                 msg += f"{nome}: {simbolo} {val}%\n"
 
-        # Small caps automaticamente
-        small_alerts = small_cap_alerts()
-        if small_alerts:
+        # Small-cap
+        small_alert = small_cap_alerts()
+        if small_alert:
             alert_flag = True
-            for ticker, testo in small_alerts.items():
-                msg += f"{ticker}: {testo}\n"
+            for t, v in small_alert.items():
+                simbolo = "⬆️" if v>0 else "⬇️"
+                msg += f"{t}: {simbolo} {v}%\n"
 
-        # Notizie rilevanti
-        news_alerts = check_news()
-        if news_alerts:
+            # Grafico
+            grafico = crea_grafico_small_cap(small_alert)
+        else:
+            grafico = None
+
+        # Notizie
+        news_alert = check_news()
+        if news_alert:
             alert_flag = True
-            msg += "\n📌 Notizie rilevanti:\n" + "\n".join(news_alerts)
+            msg += "\n📌 Notizie rilevanti:\n" + "\n".join(news_alert)
 
-        # Invia solo se ci sono alert
+        # Invia messaggio
         if alert_flag:
-            await bot.send_message(chat_id=int(CHAT_ID), text=msg)
+            if grafico:
+                await bot.send_photo(chat_id=int(CHAT_ID), photo=open(grafico,'rb'), caption=msg)
+            else:
+                await bot.send_message(chat_id=int(CHAT_ID), text=msg)
         else:
             print("Nessun alert oggi – mercati stabili")
 
     except Exception as e:
-        print("Errore durante controllo mercati/notizie:", e)
-        # fallback ultra-sicuro: non invia nulla
+        print("Errore durante controllo mercati/notizie/grafico:", e)
 
-if __name__ == "__main__":
+if __name__=="__main__":
     asyncio.run(main())
