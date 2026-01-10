@@ -1,4 +1,5 @@
 import yfinance as yf
+import pandas as pd
 import asyncio
 import os
 from telegram import Bot
@@ -10,70 +11,95 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise ValueError("TOKEN o CHAT_ID mancanti")
+    raise ValueError("❌ TELEGRAM_TOKEN o TELEGRAM_CHAT_ID mancanti")
 
 bot = Bot(token=TOKEN)
 
-SOGLIA_MOVE = 2.5  # %
-
+# =====================
+# CONFIG
+# =====================
 TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST"]
+SOGLIA_MOVE = 2.0          # %
+RSI_BUY = 30
+RSI_SELL = 70
+VOLUME_MULT = 2.0
 
 # =====================
-# MOVIMENTO INTRADAY
+# RSI
 # =====================
-def intraday_move(ticker):
-    df = yf.download(ticker, period="1d", interval="5m", progress=False)
+def calcola_rsi(series, periodi=14):
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0).rolling(periodi).mean()
+    loss = -delta.where(delta < 0, 0).rolling(periodi).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.iloc[-1]
 
-    if df.empty:
-        return None
-
+# =====================
+# INTRADAY MOVE
+# =====================
+def intraday_move(df):
     open_price = df["Open"].iloc[0].item()
     last_price = df["Close"].iloc[-1].item()
-
-    move = ((last_price - open_price) / open_price) * 100
-    return round(move, 2)
+    return round(((last_price - open_price) / open_price) * 100, 2)
 
 # =====================
-# SEGNALE OPERATIVO
+# ANALISI COMPLETA
 # =====================
-def segnale_operativo(ticker):
-    df = yf.download(ticker, period="1d", interval="5m", progress=False)
+def analizza_ticker(ticker):
+    df = yf.download(
+        ticker,
+        period="1d",
+        interval="5m",
+        progress=False
+    )
 
-    if df.empty:
-        return "NO DATA"
+    if df.empty or len(df) < 20:
+        return None
 
-    last = df["Close"].iloc[-1].item()
-    high = df["High"].max().item()
-    low = df["Low"].min().item()
+    move = intraday_move(df)
+    rsi = round(calcola_rsi(df["Close"]), 2)
 
-    move = intraday_move(ticker)
-    if move is None:
-        return "NO DATA"
+    vol_attuale = df["Volume"].iloc[-1].item()
+    vol_media = df["Volume"].rolling(20).mean().iloc[-1].item()
 
-    if last >= high * 0.995 and move >= SOGLIA_MOVE:
-        return "BUY 🚀 Breakout"
+    volume_spike = vol_attuale >= vol_media * VOLUME_MULT
 
-    if last <= low * 1.005 and move <= -SOGLIA_MOVE:
-        return "SELL 🔻 Breakdown"
+    segnale = "HOLD ⏸"
 
-    return "HOLD ⏸"
+    if rsi <= RSI_BUY and volume_spike:
+        segnale = "🟢 BUY FORTE"
+
+    elif rsi >= RSI_SELL and volume_spike:
+        segnale = "🔴 SELL FORTE"
+
+    return {
+        "ticker": ticker,
+        "move": move,
+        "rsi": rsi,
+        "volume_spike": volume_spike,
+        "segnale": segnale
+    }
 
 # =====================
 # MAIN
 # =====================
 async def main():
-    messaggio = "📊 SEGNALI DI MERCATO\n\n"
+    messaggio = "📊 SEGNALI INTRADAY\n\n"
 
     for ticker in TICKERS:
-        move = intraday_move(ticker)
-        segnale = segnale_operativo(ticker)
+        dati = analizza_ticker(ticker)
 
-        if move is not None:
-            messaggio += (
-                f"{ticker}\n"
-                f"Movimento: {move}%\n"
-                f"Segnale: {segnale}\n\n"
-            )
+        if dati is None:
+            continue
+
+        messaggio += (
+            f"{dati['ticker']}\n"
+            f"Movimento: {dati['move']}%\n"
+            f"RSI: {dati['rsi']}\n"
+            f"Volume: {'🔥 ANOMALO' if dati['volume_spike'] else 'normale'}\n"
+            f"Segnale: {dati['segnale']}\n\n"
+        )
 
     await bot.send_message(chat_id=CHAT_ID, text=messaggio)
 
