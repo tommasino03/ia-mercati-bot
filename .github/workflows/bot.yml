@@ -1,17 +1,14 @@
-name: IA Mercati Bot
+name: Bot Telegram
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 9 * * *"   # ogni giorno alle 9:00
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -19,13 +16,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install yfinance python-telegram-bot==20.7 pandas numpy
+        run: pip install python-telegram-bot --upgrade
 
       - name: Run bot
+        run: python bot.py
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: |
-          python bot.py
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
