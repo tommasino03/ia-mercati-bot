@@ -18,10 +18,8 @@ bot = Bot(token=TOKEN)
 # CONFIG
 # =====================
 TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST"]
-SOGLIA_MOVE = 2.0
 RSI_BUY = 30
 RSI_SELL = 70
-VOLUME_MULT = 2.0
 
 # =====================
 # RSI
@@ -35,7 +33,40 @@ def calcola_rsi(close, periodi=14):
     return float(rsi.iloc[-1])
 
 # =====================
-# ANALISI TITOLO
+# SCORE
+# =====================
+def calcola_score(rsi, vol_att, vol_avg, move):
+    score = 0
+
+    # RSI
+    if rsi <= 25:
+        score += 40
+    elif rsi <= 30:
+        score += 30
+    elif rsi <= 35:
+        score += 20
+
+    # Volume
+    ratio = vol_att / vol_avg if vol_avg > 0 else 0
+    if ratio >= 3:
+        score += 40
+    elif ratio >= 2:
+        score += 30
+    elif ratio >= 1.5:
+        score += 20
+
+    # Movimento
+    if abs(move) >= 5:
+        score += 20
+    elif abs(move) >= 3:
+        score += 15
+    elif abs(move) >= 2:
+        score += 10
+
+    return score
+
+# =====================
+# ANALISI
 # =====================
 def analizza_ticker(ticker):
     df = yf.download(ticker, period="1d", interval="5m", progress=False)
@@ -43,28 +74,31 @@ def analizza_ticker(ticker):
     if df.empty or len(df) < 30:
         return None
 
-    open_price = float(df["Open"].iloc[0])
-    last_price = float(df["Close"].iloc[-1])
-    move = round(((last_price - open_price) / open_price) * 100, 2)
+    open_p = float(df["Open"].iloc[0])
+    last_p = float(df["Close"].iloc[-1])
+    move = round(((last_p - open_p) / open_p) * 100, 2)
 
     rsi = calcola_rsi(df["Close"])
 
-    vol_attuale = float(df["Volume"].iloc[-1])
-    vol_media = float(df["Volume"].rolling(20).mean().iloc[-1])
-    volume_spike = vol_attuale >= vol_media * VOLUME_MULT
+    vol_att = float(df["Volume"].iloc[-1])
+    vol_avg = float(df["Volume"].rolling(20).mean().iloc[-1])
 
-    segnale = "HOLD ⏸"
+    score = calcola_score(rsi, vol_att, vol_avg, move)
 
-    if rsi <= RSI_BUY and volume_spike:
-        segnale = "🟢 BUY FORTE"
-    elif rsi >= RSI_SELL and volume_spike:
-        segnale = "🔴 SELL FORTE"
+    if score >= 80:
+        segnale = "🚀 SEGNALE FORTISSIMO"
+    elif score >= 60:
+        segnale = "✅ BUON SEGNALE"
+    elif score >= 40:
+        segnale = "⚠️ SEGNALE DEBOLE"
+    else:
+        segnale = "⏸ IGNORA"
 
     return {
         "ticker": ticker,
         "move": move,
         "rsi": rsi,
-        "volume_spike": volume_spike,
+        "score": score,
         "segnale": segnale
     }
 
@@ -72,19 +106,19 @@ def analizza_ticker(ticker):
 # MAIN
 # =====================
 async def main():
-    messaggio = "📊 SEGNALI INTRADAY\n\n"
+    messaggio = "📊 SCORE DI MERCATO\n\n"
 
-    for ticker in TICKERS:
-        dati = analizza_ticker(ticker)
-        if not dati:
+    for t in TICKERS:
+        d = analizza_ticker(t)
+        if not d:
             continue
 
         messaggio += (
-            f"{dati['ticker']}\n"
-            f"Movimento: {dati['move']}%\n"
-            f"RSI: {dati['rsi']}\n"
-            f"Volume: {'🔥 ANOMALO' if dati['volume_spike'] else 'normale'}\n"
-            f"Segnale: {dati['segnale']}\n\n"
+            f"{d['ticker']}\n"
+            f"Move: {d['move']}%\n"
+            f"RSI: {d['rsi']}\n"
+            f"SCORE: {d['score']}/100\n"
+            f"Segnale: {d['segnale']}\n\n"
         )
 
     await bot.send_message(chat_id=CHAT_ID, text=messaggio)
