@@ -13,19 +13,18 @@ print("TOKEN:", "OK" if TOKEN else "MANCANTE")
 print("CHAT_ID:", "OK" if CHAT_ID else "MANCANTE")
 
 # Configurazioni
-SOGLIA_VOLATILITA = 2.0      # soglia minima % alert
-GIORNI_MEDIA = 5             # giorni per calcolare media storica
-NUM_TOP_VOL = 10             # quante small-cap più volatili considerare
+SOGLIA_VOLATILITA = 2.0      # soglia % minima alert
+GIORNI_MEDIA = 5             # giorni per media storica
+NUM_TOP_VOL = 10             # top N small-cap
 RSS_FEED = "https://www.coindesk.com/arc/outboundfeeds/rss/"
 KEYWORDS = ["bitcoin", "crypto", "market", "indice"]
 
-# Funzione variazione %
+# Funzioni utility
 def variazione_percentuale(df):
     if len(df) < 2:
         return 0
     return round((df["Close"][-1] / df["Close"][-2] - 1) * 100, 2)
 
-# Controllo anomalia rispetto media storica
 def controllo_anomalia(ticker):
     df = yf.Ticker(ticker).history(period=f"{GIORNI_MEDIA+1}d")
     if len(df) < 2:
@@ -36,7 +35,6 @@ def controllo_anomalia(ticker):
         return oggi
     return None
 
-# Controllo notizie RSS
 def check_news():
     feed = feedparser.parse(RSS_FEED)
     alerts = []
@@ -46,15 +44,12 @@ def check_news():
                 alerts.append(f"📰 {entry.title}\n{entry.link}")
     return alerts
 
-# Small-cap automatiche: selezione top-N più volatili
 def small_cap_alerts():
-    # Lista esempio di small-cap US (puoi usare ETF Russell 2000)
     SMALL_CAPS = [
         "PLTR","NIO","RIVN","COIN","LCID","SOFI","AFRM","SNAP","TWLO","FUBO",
         "MARA","HUT","RIOT","ETSY","DDOG","UBER","LYFT","CRWD","DOCU","SQ",
         "GME","AMC","SNDL","KOSS","BB","BARK","ZNGA","SPCE","VYGR","FCEL"
     ]
-    # Calcolo variazioni odierne
     vol_dict = {}
     for ticker in SMALL_CAPS:
         val = controllo_anomalia(ticker)
@@ -64,7 +59,6 @@ def small_cap_alerts():
     top_vol = dict(sorted(vol_dict.items(), key=lambda x: abs(x[1]), reverse=True)[:NUM_TOP_VOL])
     return top_vol
 
-# Crea grafico small-cap
 def crea_grafico_small_cap(alerts):
     tickers = list(alerts.keys())
     valori = [alerts[t] for t in tickers]
@@ -83,6 +77,18 @@ def crea_grafico_small_cap(alerts):
     plt.close()
     return file_png
 
+def correlazione_btc_smallcap(btc_val, small_alerts):
+    if btc_val is None or not small_alerts:
+        return None
+    trend_btc = 1 if btc_val>0 else -1
+    trend_small = [1 if v>0 else -1 for v in small_alerts.values()]
+    same_trend = sum(1 for t in trend_small if t==trend_btc)
+    percentuale = same_trend / len(trend_small) * 100
+    if percentuale >= 60:  # se almeno 60% small-cap segue BTC
+        direzione = "rialzista" if trend_btc>0 else "ribassista"
+        return f"⚡ BTC {direzione} e {int(percentuale)}% delle small-cap seguono lo stesso trend"
+    return None
+
 async def main():
     if not TOKEN or not CHAT_ID:
         raise ValueError("❌ TELEGRAM_TOKEN o TELEGRAM_CHAT_ID mancanti")
@@ -94,14 +100,17 @@ async def main():
     try:
         # Principali
         principali = {"₿ Bitcoin":"BTC-USD","📈 S&P 500":"^GSPC","💻 Nasdaq":"^IXIC"}
+        btc_val = None
         for nome, ticker in principali.items():
             val = controllo_anomalia(ticker)
+            if nome=="₿ Bitcoin":
+                btc_val = val
             if val is not None:
                 alert_flag = True
                 simbolo = "⬆️" if val>0 else "⬇️"
                 msg += f"{nome}: {simbolo} {val}%\n"
 
-        # Small-cap automatiche
+        # Small-cap
         small_alert = small_cap_alerts()
         if small_alert:
             alert_flag = True
@@ -111,6 +120,12 @@ async def main():
             grafico = crea_grafico_small_cap(small_alert)
         else:
             grafico = None
+
+        # Correlazione BTC ↔ small-cap
+        corr_msg = correlazione_btc_smallcap(btc_val, small_alert)
+        if corr_msg:
+            alert_flag = True
+            msg += f"\n{corr_msg}\n"
 
         # Notizie
         news_alert = check_news()
@@ -128,7 +143,7 @@ async def main():
             print("Nessun alert oggi – mercati stabili")
 
     except Exception as e:
-        print("Errore durante controllo mercati/notizie/grafico:", e)
+        print("Errore durante controllo mercati/notizie/grafico/correlazione:", e)
 
 if __name__=="__main__":
     asyncio.run(main())
