@@ -15,8 +15,10 @@ if not TOKEN or not CHAT_ID:
 bot = Bot(token=TOKEN)
 
 # =========================
-# INDICI MERCATO
+# CONFIG
 # =========================
+TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST"]
+
 SP500 = "^GSPC"
 NASDAQ = "^NDX"
 VIX = "^VIX"
@@ -26,61 +28,86 @@ VIX = "^VIX"
 # =========================
 def trend_index(ticker):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
-
     if df.empty or len(df) < 50:
         return None
 
     close = df["Close"]
-
     last = float(close.iloc[-1])
     ma50 = float(close.rolling(50).mean().iloc[-1])
 
-    if last > ma50:
-        return "UP"
-    else:
-        return "DOWN"
+    return "UP" if last > ma50 else "DOWN"
 
 def valore_attuale(ticker):
     df = yf.download(ticker, period="5d", interval="1d", progress=False)
-
     if df.empty:
         return None
-
     return float(df["Close"].iloc[-1])
 
+def calcola_rsi(close, periodi=14):
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(periodi).mean()
+    loss = -delta.clip(upper=0).rolling(periodi).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return float(rsi.iloc[-1])
+
 # =========================
-# ANALISI CONTESTO MERCATO
+# STEP 1 – CONTESTO
 # =========================
 def analizza_mercato():
-    sp_trend = trend_index(SP500)
-    nasdaq_trend = trend_index(NASDAQ)
-    vix_value = valore_attuale(VIX)
+    sp = trend_index(SP500)
+    nasdaq = trend_index(NASDAQ)
+    vix = valore_attuale(VIX)
 
-    if sp_trend is None or nasdaq_trend is None or vix_value is None:
-        return {
-            "status": "⚠️ DATI NON DISPONIBILI",
-            "tradabile": False,
-            "sp500": "N/A",
-            "nasdaq": "N/A",
-            "vix": "N/A"
-        }
+    if sp is None or nasdaq is None or vix is None:
+        return "NEUTRAL"
 
-    if sp_trend == "UP" and nasdaq_trend == "UP" and vix_value < 20:
-        stato = "🟢 MERCATO FAVOREVOLE (RISK ON)"
-        tradabile = True
-    elif vix_value >= 25 or (sp_trend == "DOWN" and nasdaq_trend == "DOWN"):
-        stato = "🔴 MERCATO RISK-OFF (STOP BUY)"
-        tradabile = False
+    if sp == "UP" and nasdaq == "UP" and vix < 20:
+        return "BULL"
+    elif vix >= 25:
+        return "BEAR"
     else:
-        stato = "🟡 MERCATO NEUTRO (ATTENZIONE)"
-        tradabile = False
+        return "NEUTRAL"
+
+# =========================
+# STEP 2 – SEGNALE OPERATIVO
+# =========================
+def segnale_operativo(ticker, mercato):
+    df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+    if df.empty or len(df) < 30:
+        return None
+
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+
+    last = float(close.iloc[-1])
+    rsi = calcola_rsi(close)
+
+    supporto = float(low.rolling(10).min().iloc[-1])
+    resistenza = float(high.rolling(10).max().iloc[-1])
+
+    entry = last
+    stop = round(supporto * 0.99, 2)
+    target = round(resistenza * 1.01, 2)
+
+    # LOGICA DECISIONALE
+    if mercato == "BULL" and rsi < 35 and last > supporto:
+        azione = "🟢 BUY"
+    elif rsi > 70:
+        azione = "🔴 SELL / TAKE PROFIT"
+    elif mercato == "BEAR":
+        azione = "⛔ NO TRADE (mercato negativo)"
+    else:
+        azione = "🟡 WAIT"
 
     return {
-        "status": stato,
-        "tradabile": tradabile,
-        "sp500": sp_trend,
-        "nasdaq": nasdaq_trend,
-        "vix": round(vix_value, 2)
+        "ticker": ticker,
+        "azione": azione,
+        "entry": round(entry, 2),
+        "stop": stop,
+        "target": target,
+        "rsi": round(rsi, 1)
     }
 
 # =========================
@@ -89,13 +116,27 @@ def analizza_mercato():
 async def main():
     mercato = analizza_mercato()
 
-    messaggio = (
-        "📊 CONTESTO DI MERCATO\n\n"
-        f"S&P 500: {mercato['sp500']}\n"
-        f"Nasdaq: {mercato['nasdaq']}\n"
-        f"VIX: {mercato['vix']}\n\n"
-        f"➡️ {mercato['status']}"
-    )
+    header = {
+        "BULL": "🟢 MERCATO FAVOREVOLE",
+        "BEAR": "🔴 MERCATO RISK-OFF",
+        "NEUTRAL": "🟡 MERCATO NEUTRO"
+    }
+
+    messaggio = f"📊 CONTESTO MERCATO\n{header[mercato]}\n\n"
+
+    for t in TICKERS:
+        s = segnale_operativo(t, mercato)
+        if not s:
+            continue
+
+        messaggio += (
+            f"{s['ticker']}\n"
+            f"{s['azione']}\n"
+            f"RSI: {s['rsi']}\n"
+            f"Entry: {s['entry']}\n"
+            f"Stop: {s['stop']}\n"
+            f"Target: {s['target']}\n\n"
+        )
 
     await bot.send_message(chat_id=CHAT_ID, text=messaggio)
 
