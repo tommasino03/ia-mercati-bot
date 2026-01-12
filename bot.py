@@ -22,23 +22,30 @@ NASDAQ = "^NDX"
 VIX = "^VIX"
 
 # =========================
-# UTILS
+# UTILS SICURI
 # =========================
 def trend_index(ticker):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+
     if df.empty or len(df) < 50:
         return None
 
     close = df["Close"]
-    ma50 = close.rolling(50).mean().iloc[-1]
-    last = close.iloc[-1]
 
-    return "UP" if last > ma50 else "DOWN"
+    last = float(close.iloc[-1])
+    ma50 = float(close.rolling(50).mean().iloc[-1])
+
+    if last > ma50:
+        return "UP"
+    else:
+        return "DOWN"
 
 def valore_attuale(ticker):
     df = yf.download(ticker, period="5d", interval="1d", progress=False)
+
     if df.empty:
         return None
+
     return float(df["Close"].iloc[-1])
 
 # =========================
@@ -49,13 +56,15 @@ def analizza_mercato():
     nasdaq_trend = trend_index(NASDAQ)
     vix_value = valore_attuale(VIX)
 
-    if not sp_trend or not nasdaq_trend or vix_value is None:
+    if sp_trend is None or nasdaq_trend is None or vix_value is None:
         return {
             "status": "⚠️ DATI NON DISPONIBILI",
-            "tradabile": False
+            "tradabile": False,
+            "sp500": "N/A",
+            "nasdaq": "N/A",
+            "vix": "N/A"
         }
 
-    # LOGICA DECISIONALE
     if sp_trend == "UP" and nasdaq_trend == "UP" and vix_value < 20:
         stato = "🟢 MERCATO FAVOREVOLE (RISK ON)"
         tradabile = True
@@ -82,14 +91,13 @@ async def main():
 
     messaggio = (
         "📊 CONTESTO DI MERCATO\n\n"
-        f"S&P 500: {mercato.get('sp500')}\n"
-        f"Nasdaq: {mercato.get('nasdaq')}\n"
-        f"VIX: {mercato.get('vix')}\n\n"
-        f"➡️ {mercato.get('status')}"
+        f"S&P 500: {mercato['sp500']}\n"
+        f"Nasdaq: {mercato['nasdaq']}\n"
+        f"VIX: {mercato['vix']}\n\n"
+        f"➡️ {mercato['status']}"
     )
 
     await bot.send_message(chat_id=CHAT_ID, text=messaggio)
 
 if __name__ == "__main__":
     asyncio.run(main())
-
