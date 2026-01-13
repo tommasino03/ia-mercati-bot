@@ -23,7 +23,10 @@ SP500 = "^GSPC"
 NASDAQ = "^NDX"
 VIX = "^VIX"
 
-MIN_SCORE = 70   # soglia operativa
+MIN_SCORE = 70
+
+CAPITALE = 10_000      # €
+RISCHIO_PERC = 0.01    # 1%
 
 # =========================
 # UTILS
@@ -93,11 +96,10 @@ def rileva_accumulo(df):
         return "NONE"
 
 # =========================
-# STEP 4 – SIGNAL SCORE
+# STEP 4 – SCORE
 # =========================
 def calcola_score(df, mercato, accumulo):
     score = 0
-
     close = df["Close"]
     high = df["High"]
     low = df["Low"]
@@ -105,30 +107,25 @@ def calcola_score(df, mercato, accumulo):
     last = float(close.iloc[-1])
     rsi = calcola_rsi(close)
 
-    # 1️⃣ Contesto mercato (20)
     if mercato == "BULL":
         score += 20
     elif mercato == "NEUTRAL":
         score += 10
 
-    # 2️⃣ RSI (20)
     if 25 <= rsi <= 40:
         score += 20
     elif 40 < rsi <= 50:
         score += 10
 
-    # 3️⃣ Accumulo / Breakout (25)
     if accumulo == "ACCUMULO":
         score += 18
     elif accumulo == "BREAKOUT":
         score += 25
 
-    # 4️⃣ Trend breve (15)
     ma20 = float(close.rolling(20).mean().iloc[-1])
     if last > ma20:
         score += 15
 
-    # 5️⃣ Risk / Reward (20)
     supporto = float(low.rolling(10).min().iloc[-1])
     resistenza = float(high.rolling(10).max().iloc[-1])
 
@@ -140,10 +137,23 @@ def calcola_score(df, mercato, accumulo):
     elif reward > risk:
         score += 10
 
-    return round(score, 1), round(rsi, 1)
+    return round(score, 1), round(rsi, 1), supporto
 
 # =========================
-# SEGNALE
+# STEP 5 – POSITION SIZE
+# =========================
+def calcola_position_size(prezzo, stop):
+    rischio_trade = CAPITALE * RISCHIO_PERC
+    rischio_unit = prezzo - stop
+
+    if rischio_unit <= 0:
+        return 0
+
+    qty = int(rischio_trade / rischio_unit)
+    return qty if qty > 0 else 0
+
+# =========================
+# SEGNALE FINALE
 # =========================
 def segnale(ticker, mercato):
     df = yf.download(ticker, period="1mo", interval="1d", progress=False)
@@ -151,21 +161,23 @@ def segnale(ticker, mercato):
         return None
 
     accumulo = rileva_accumulo(df)
-    score, rsi = calcola_score(df, mercato, accumulo)
+    score, rsi, stop = calcola_score(df, mercato, accumulo)
+    last = float(df["Close"].iloc[-1])
 
-    if score >= MIN_SCORE:
-        azione = "🟢 BUY HIGH QUALITY"
-    elif score >= 60:
-        azione = "🟡 WATCHLIST"
-    else:
-        azione = "⛔ NO TRADE"
+    if score < MIN_SCORE:
+        return None
+
+    qty = calcola_position_size(last, stop)
+    if qty == 0:
+        return None
 
     return {
         "ticker": ticker,
-        "azione": azione,
+        "prezzo": round(last, 2),
+        "stop": round(stop, 2),
+        "qty": qty,
         "score": score,
-        "rsi": rsi,
-        "accumulo": accumulo
+        "rsi": rsi
     }
 
 # =========================
@@ -181,14 +193,16 @@ async def main():
             continue
 
         messaggio += (
-            f"{s['ticker']}\n"
-            f"{s['azione']}\n"
+            f"🟢 {s['ticker']} BUY\n"
+            f"Prezzo: {s['prezzo']}\n"
+            f"Stop: {s['stop']}\n"
+            f"Quantità: {s['qty']} azioni\n"
             f"SCORE: {s['score']}/100\n"
-            f"RSI: {s['rsi']}\n"
-            f"SETUP: {s['accumulo']}\n\n"
+            f"RSI: {s['rsi']}\n\n"
         )
 
-    await bot.send_message(chat_id=CHAT_ID, text=messaggio)
+    if messaggio.strip():
+        await bot.send_message(chat_id=CHAT_ID, text=messaggio)
 
 if __name__ == "__main__":
     asyncio.run(main())
