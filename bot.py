@@ -30,11 +30,9 @@ def trend_index(ticker):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
     if df.empty or len(df) < 50:
         return None
-
     close = df["Close"]
     last = float(close.iloc[-1])
     ma50 = float(close.rolling(50).mean().iloc[-1])
-
     return "UP" if last > ma50 else "DOWN"
 
 def valore_attuale(ticker):
@@ -70,6 +68,35 @@ def analizza_mercato():
         return "NEUTRAL"
 
 # =========================
+# STEP 3 – ACCUMULO ISTITUZIONALE
+# =========================
+def rileva_accumulo(df):
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+    volume = df["Volume"]
+
+    last = float(close.iloc[-1])
+
+    # Range stretto (ultimi 10 giorni)
+    max_h = float(high.rolling(10).max().iloc[-1])
+    min_l = float(low.rolling(10).min().iloc[-1])
+    range_pct = (max_h - min_l) / last * 100
+
+    # Volume
+    vol_last = float(volume.iloc[-1])
+    vol_avg = float(volume.rolling(20).mean().iloc[-1])
+
+    rsi = calcola_rsi(close)
+
+    if range_pct < 4 and vol_last > vol_avg * 1.5 and rsi < 55:
+        return "🧠 ACCUMULO"
+    elif last > max_h * 0.995 and vol_last > vol_avg * 2:
+        return "🚀 BREAKOUT"
+    else:
+        return "⏳ IN ATTESA"
+
+# =========================
 # STEP 2 – SEGNALE OPERATIVO
 # =========================
 def segnale_operativo(ticker, mercato):
@@ -91,9 +118,12 @@ def segnale_operativo(ticker, mercato):
     stop = round(supporto * 0.99, 2)
     target = round(resistenza * 1.01, 2)
 
-    # LOGICA DECISIONALE
-    if mercato == "BULL" and rsi < 35 and last > supporto:
-        azione = "🟢 BUY"
+    accumulo = rileva_accumulo(df)
+
+    if mercato == "BULL" and rsi < 35 and accumulo in ["🧠 ACCUMULO", "🚀 BREAKOUT"]:
+        azione = "🟢 BUY (setup istituzionale)"
+    elif accumulo == "🚀 BREAKOUT" and mercato != "BEAR":
+        azione = "🚀 BUY BREAKOUT"
     elif rsi > 70:
         azione = "🔴 SELL / TAKE PROFIT"
     elif mercato == "BEAR":
@@ -104,6 +134,7 @@ def segnale_operativo(ticker, mercato):
     return {
         "ticker": ticker,
         "azione": azione,
+        "accumulo": accumulo,
         "entry": round(entry, 2),
         "stop": stop,
         "target": target,
@@ -132,6 +163,7 @@ async def main():
         messaggio += (
             f"{s['ticker']}\n"
             f"{s['azione']}\n"
+            f"{s['accumulo']}\n"
             f"RSI: {s['rsi']}\n"
             f"Entry: {s['entry']}\n"
             f"Stop: {s['stop']}\n"
