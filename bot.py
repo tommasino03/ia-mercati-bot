@@ -25,8 +25,10 @@ VIX = "^VIX"
 
 MIN_SCORE = 70
 
-CAPITALE = 10_000      # €
-RISCHIO_PERC = 0.01    # 1%
+CAPITALE = 10_000
+RISCHIO_PERC = 0.01
+
+ATR_MULT = 1.5
 
 # =========================
 # UTILS
@@ -47,6 +49,22 @@ def calcola_rsi(close, periodi=14):
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return float(rsi.iloc[-1])
+
+def calcola_atr(df, periodi=14):
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+
+    tr = (
+        (high - low)
+        .to_frame("hl")
+        .join((high - close.shift()).abs().to_frame("hc"))
+        .join((low - close.shift()).abs().to_frame("lc"))
+        .max(axis=1)
+    )
+
+    atr = tr.rolling(periodi).mean()
+    return float(atr.iloc[-1])
 
 # =========================
 # STEP 1 – MERCATO
@@ -78,7 +96,6 @@ def rileva_accumulo(df):
     volume = df["Volume"]
 
     last = float(close.iloc[-1])
-
     max_h = float(high.rolling(10).max().iloc[-1])
     min_l = float(low.rolling(10).min().iloc[-1])
     range_pct = (max_h - min_l) / last * 100
@@ -153,10 +170,30 @@ def calcola_position_size(prezzo, stop):
     return qty if qty > 0 else 0
 
 # =========================
-# SEGNALE FINALE
+# STEP 6 – TRAILING STOP
+# =========================
+def trailing_stop(entry, stop, df):
+    close = df["Close"]
+    high = df["High"]
+
+    last = float(close.iloc[-1])
+    atr = calcola_atr(df)
+
+    # Break-even
+    if last >= entry + (entry - stop):
+        stop = max(stop, entry)
+
+    # Trailing ATR
+    new_stop = float(high.iloc[-1]) - atr * ATR_MULT
+    stop = max(stop, new_stop)
+
+    return round(stop, 2)
+
+# =========================
+# SEGNALE
 # =========================
 def segnale(ticker, mercato):
-    df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+    df = yf.download(ticker, period="2mo", interval="1d", progress=False)
     if df.empty or len(df) < 30:
         return None
 
@@ -171,10 +208,13 @@ def segnale(ticker, mercato):
     if qty == 0:
         return None
 
+    stop_trail = trailing_stop(last, stop, df)
+
     return {
         "ticker": ticker,
         "prezzo": round(last, 2),
         "stop": round(stop, 2),
+        "stop_trailing": stop_trail,
         "qty": qty,
         "score": score,
         "rsi": rsi
@@ -185,24 +225,25 @@ def segnale(ticker, mercato):
 # =========================
 async def main():
     mercato = analizza_mercato()
-    messaggio = f"📊 MERCATO: {mercato}\n\n"
+    msg = f"📊 MERCATO: {mercato}\n\n"
 
     for t in TICKERS:
         s = segnale(t, mercato)
         if not s:
             continue
 
-        messaggio += (
+        msg += (
             f"🟢 {s['ticker']} BUY\n"
             f"Prezzo: {s['prezzo']}\n"
-            f"Stop: {s['stop']}\n"
-            f"Quantità: {s['qty']} azioni\n"
-            f"SCORE: {s['score']}/100\n"
+            f"Stop iniziale: {s['stop']}\n"
+            f"Stop trailing: {s['stop_trailing']}\n"
+            f"Quantità: {s['qty']}\n"
+            f"SCORE: {s['score']}\n"
             f"RSI: {s['rsi']}\n\n"
         )
 
-    if messaggio.strip():
-        await bot.send_message(chat_id=CHAT_ID, text=messaggio)
+    if msg.strip():
+        await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 if __name__ == "__main__":
     asyncio.run(main())
