@@ -23,8 +23,10 @@ SP500 = "^GSPC"
 NASDAQ = "^NDX"
 VIX = "^VIX"
 
+MIN_SCORE = 70   # soglia operativa
+
 # =========================
-# UTILS SICURI
+# UTILS
 # =========================
 def trend_index(ticker):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
@@ -35,12 +37,6 @@ def trend_index(ticker):
     ma50 = float(close.rolling(50).mean().iloc[-1])
     return "UP" if last > ma50 else "DOWN"
 
-def valore_attuale(ticker):
-    df = yf.download(ticker, period="5d", interval="1d", progress=False)
-    if df.empty:
-        return None
-    return float(df["Close"].iloc[-1])
-
 def calcola_rsi(close, periodi=14):
     delta = close.diff()
     gain = delta.clip(lower=0).rolling(periodi).mean()
@@ -50,25 +46,27 @@ def calcola_rsi(close, periodi=14):
     return float(rsi.iloc[-1])
 
 # =========================
-# STEP 1 – CONTESTO
+# STEP 1 – MERCATO
 # =========================
 def analizza_mercato():
     sp = trend_index(SP500)
     nasdaq = trend_index(NASDAQ)
-    vix = valore_attuale(VIX)
+    vix = yf.download(VIX, period="5d", interval="1d", progress=False)
 
-    if sp is None or nasdaq is None or vix is None:
+    if sp is None or nasdaq is None or vix.empty:
         return "NEUTRAL"
 
-    if sp == "UP" and nasdaq == "UP" and vix < 20:
+    vix_val = float(vix["Close"].iloc[-1])
+
+    if sp == "UP" and nasdaq == "UP" and vix_val < 20:
         return "BULL"
-    elif vix >= 25:
+    elif vix_val >= 25:
         return "BEAR"
     else:
         return "NEUTRAL"
 
 # =========================
-# STEP 3 – ACCUMULO ISTITUZIONALE
+# STEP 3 – ACCUMULO
 # =========================
 def rileva_accumulo(df):
     close = df["Close"]
@@ -78,31 +76,27 @@ def rileva_accumulo(df):
 
     last = float(close.iloc[-1])
 
-    # Range stretto (ultimi 10 giorni)
     max_h = float(high.rolling(10).max().iloc[-1])
     min_l = float(low.rolling(10).min().iloc[-1])
     range_pct = (max_h - min_l) / last * 100
 
-    # Volume
     vol_last = float(volume.iloc[-1])
     vol_avg = float(volume.rolling(20).mean().iloc[-1])
 
     rsi = calcola_rsi(close)
 
     if range_pct < 4 and vol_last > vol_avg * 1.5 and rsi < 55:
-        return "🧠 ACCUMULO"
+        return "ACCUMULO"
     elif last > max_h * 0.995 and vol_last > vol_avg * 2:
-        return "🚀 BREAKOUT"
+        return "BREAKOUT"
     else:
-        return "⏳ IN ATTESA"
+        return "NONE"
 
 # =========================
-# STEP 2 – SEGNALE OPERATIVO
+# STEP 4 – SIGNAL SCORE
 # =========================
-def segnale_operativo(ticker, mercato):
-    df = yf.download(ticker, period="1mo", interval="1d", progress=False)
-    if df.empty or len(df) < 30:
-        return None
+def calcola_score(df, mercato, accumulo):
+    score = 0
 
     close = df["Close"]
     high = df["High"]
@@ -111,34 +105,67 @@ def segnale_operativo(ticker, mercato):
     last = float(close.iloc[-1])
     rsi = calcola_rsi(close)
 
+    # 1️⃣ Contesto mercato (20)
+    if mercato == "BULL":
+        score += 20
+    elif mercato == "NEUTRAL":
+        score += 10
+
+    # 2️⃣ RSI (20)
+    if 25 <= rsi <= 40:
+        score += 20
+    elif 40 < rsi <= 50:
+        score += 10
+
+    # 3️⃣ Accumulo / Breakout (25)
+    if accumulo == "ACCUMULO":
+        score += 18
+    elif accumulo == "BREAKOUT":
+        score += 25
+
+    # 4️⃣ Trend breve (15)
+    ma20 = float(close.rolling(20).mean().iloc[-1])
+    if last > ma20:
+        score += 15
+
+    # 5️⃣ Risk / Reward (20)
     supporto = float(low.rolling(10).min().iloc[-1])
     resistenza = float(high.rolling(10).max().iloc[-1])
 
-    entry = last
-    stop = round(supporto * 0.99, 2)
-    target = round(resistenza * 1.01, 2)
+    risk = last - supporto
+    reward = resistenza - last
+
+    if reward > risk * 2:
+        score += 20
+    elif reward > risk:
+        score += 10
+
+    return round(score, 1), round(rsi, 1)
+
+# =========================
+# SEGNALE
+# =========================
+def segnale(ticker, mercato):
+    df = yf.download(ticker, period="1mo", interval="1d", progress=False)
+    if df.empty or len(df) < 30:
+        return None
 
     accumulo = rileva_accumulo(df)
+    score, rsi = calcola_score(df, mercato, accumulo)
 
-    if mercato == "BULL" and rsi < 35 and accumulo in ["🧠 ACCUMULO", "🚀 BREAKOUT"]:
-        azione = "🟢 BUY (setup istituzionale)"
-    elif accumulo == "🚀 BREAKOUT" and mercato != "BEAR":
-        azione = "🚀 BUY BREAKOUT"
-    elif rsi > 70:
-        azione = "🔴 SELL / TAKE PROFIT"
-    elif mercato == "BEAR":
-        azione = "⛔ NO TRADE (mercato negativo)"
+    if score >= MIN_SCORE:
+        azione = "🟢 BUY HIGH QUALITY"
+    elif score >= 60:
+        azione = "🟡 WATCHLIST"
     else:
-        azione = "🟡 WAIT"
+        azione = "⛔ NO TRADE"
 
     return {
         "ticker": ticker,
         "azione": azione,
-        "accumulo": accumulo,
-        "entry": round(entry, 2),
-        "stop": stop,
-        "target": target,
-        "rsi": round(rsi, 1)
+        "score": score,
+        "rsi": rsi,
+        "accumulo": accumulo
     }
 
 # =========================
@@ -146,28 +173,19 @@ def segnale_operativo(ticker, mercato):
 # =========================
 async def main():
     mercato = analizza_mercato()
-
-    header = {
-        "BULL": "🟢 MERCATO FAVOREVOLE",
-        "BEAR": "🔴 MERCATO RISK-OFF",
-        "NEUTRAL": "🟡 MERCATO NEUTRO"
-    }
-
-    messaggio = f"📊 CONTESTO MERCATO\n{header[mercato]}\n\n"
+    messaggio = f"📊 MERCATO: {mercato}\n\n"
 
     for t in TICKERS:
-        s = segnale_operativo(t, mercato)
+        s = segnale(t, mercato)
         if not s:
             continue
 
         messaggio += (
             f"{s['ticker']}\n"
             f"{s['azione']}\n"
-            f"{s['accumulo']}\n"
+            f"SCORE: {s['score']}/100\n"
             f"RSI: {s['rsi']}\n"
-            f"Entry: {s['entry']}\n"
-            f"Stop: {s['stop']}\n"
-            f"Target: {s['target']}\n\n"
+            f"SETUP: {s['accumulo']}\n\n"
         )
 
     await bot.send_message(chat_id=CHAT_ID, text=messaggio)
