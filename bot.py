@@ -1,22 +1,13 @@
+import os
+import asyncio
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
-import asyncio
-import os
 from telegram import Bot, InputFile
 
 # =======================
-# CONFIG
+# CONFIGURAZIONE
 # =======================
-TICKERS = ["AAPL", "MSFT", "NVDA", "AMD", "META"]
-RSI_BUY = 30
-RSI_SELL = 70
-MIN_EDGE = 10
-PERIODO = "6mo"
-INTERVALLO = "1d"
-
-# Telegram secrets
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -25,125 +16,125 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
 
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# =======================
-# UTILS
-# =======================
-def scalar(x):
-    """Forza qualsiasi Series/DataFrame a float puro"""
-    return float(x.iloc[-1].item())
+TICKERS = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA"]
+SMALL_CAPS = ["PLTR", "FUBO", "ROKU", "SNAP", "ZM"]
+RSI_BUY = 30
+RSI_SELL = 70
+VOL_THRESHOLD = 2
+PERC_THRESHOLD = 5
+MIN_EDGE = 5
 
 # =======================
-# INDICATORI
+# FUNZIONI UTILI
 # =======================
-def rsi(series, period=14):
-    series = series.astype(float)
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+def scalar(series):
+    return float(series.iloc[-1])
 
-def atr(df, period=14):
-    high = df["High"].astype(float)
-    low = df["Low"].astype(float)
-    close = df["Close"].astype(float)
-    tr = pd.concat([
-        high - low,
-        (high - close.shift()).abs(),
-        (low - close.shift()).abs()
-    ], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
-
-# =======================
-# TREND MERCATO
-# =======================
-def trend_index(ticker="^GSPC"):
-    df = yf.download(ticker, period="6mo", interval="1d", progress=False)
-    if df.empty or len(df) < 50:
-        return "NEUTRAL"
-    close = df["Close"].astype(float)
-    ma50 = close.rolling(50).mean()
-    return "UP" if scalar(close) > scalar(ma50) else "DOWN"
-
-# =======================
-# EDGE STATISTICO
-# =======================
 def calcola_edge(ticker):
-    df = yf.download(ticker, period=PERIODO, interval=INTERVALLO, progress=False)
+    df = yf.download(ticker, period="6mo", interval="1d", progress=False)
     if df.empty or len(df) < 60:
         return None
-    close = df["Close"].astype(float)
-    start = float(close.iloc[0].item())
-    end = scalar(close)
-    profitto = (end - start) / start * 100
-    drawdown = float(((close.cummax() - close) / close.cummax()).max().item())
-    winrate = 55  # proxy conservativo
-    edge = (profitto * 1.5) + winrate - (drawdown * 2)
-    return round(edge, 2)
 
-# =======================
-# ANALISI TICKER
-# =======================
+    close = df["Close"].astype(float)
+    start = float(close.iloc[0])
+    end = float(close.iloc[-1])
+
+    profitto = (end - start) / start * 100
+    winrate = 55
+    drawdown = ((close.cummax() - close) / close.cummax()).max() * 100
+    edge = (profitto * 1.5) + winrate - (drawdown * 2)
+    return round(float(edge), 2)
+
+def rsi(df, period=14):
+    delta = df["Close"].diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ma_up = up.rolling(period).mean()
+    ma_down = down.rolling(period).mean()
+    rs = ma_up / ma_down
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def atr(df, period=14):
+    high_low = df["High"] - df["Low"]
+    high_close = (df["High"] - df["Close"].shift()).abs()
+    low_close = (df["Low"] - df["Close"].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
+    return atr
+
 def analizza_ticker(ticker):
-    df = yf.download(ticker, period=PERIODO, interval=INTERVALLO, progress=False)
-    if df.empty or len(df) < 50:
+    df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+    if df.empty or len(df) < 20:
+        return None
+
+    close = df["Close"].astype(float)
+    volume = df["Volume"].astype(float)
+    last_close = scalar(close)
+    ma50 = close.rolling(50).mean()
+    last_ma50 = float(ma50.iloc[-1])
+    rsi_val = float(rsi(df).iloc[-1])
+    atr_val = float(atr(df).iloc[-1])
+    vol_last = scalar(volume)
+    vol_mean = float(volume.rolling(20).mean().iloc[-1])
+    volume_spike = vol_last > vol_mean * VOL_THRESHOLD
+    edge = calcola_edge(ticker)
+
+    signal = None
+    if last_close > last_ma50 and rsi_val < RSI_BUY and volume_spike:
+        signal = "BUY"
+    elif last_close < last_ma50 and rsi_val > RSI_SELL and volume_spike:
+        signal = "SELL"
+
+    if signal:
+        return {"ticker": ticker, "signal": signal, "rsi": round(rsi_val,2),
+                "atr": round(atr_val,2), "edge": edge, "df": df}
+    return None
+
+def analizza_small_cap(ticker):
+    df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+    if df.empty or len(df) < 20:
         return None
 
     close = df["Close"].astype(float)
     volume = df["Volume"].astype(float)
 
-    rsi_val = scalar(rsi(close))
-    atr_val = scalar(atr(df))
+    perc_move = (scalar(close) - float(close.iloc[-2])) / float(close.iloc[-2]) * 100
     vol_last = scalar(volume)
-    vol_mean = float(volume.rolling(20).mean().iloc[-1].item())
-    volume_spike = vol_last > vol_mean * 1.5
-    edge = calcola_edge(ticker)
+    vol_mean = float(volume.rolling(20).mean().iloc[-1])
+    volume_spike = vol_last > vol_mean * VOL_THRESHOLD
 
-    if edge is None or edge < MIN_EDGE:
-        return None
-
-    signal = None
-    if rsi_val <= RSI_BUY and volume_spike:
-        signal = "BUY"
-    elif rsi_val >= RSI_SELL:
-        signal = "SELL"
-
-    if signal:
+    if abs(perc_move) >= PERC_THRESHOLD or volume_spike:
+        signal = "MOVIMENTO ALTO"
         return {
             "ticker": ticker,
             "signal": signal,
-            "rsi": round(rsi_val, 2),
-            "atr": round(atr_val, 2),
-            "edge": edge,
+            "perc_move": round(perc_move, 2),
+            "vol_ratio": round(vol_last / vol_mean, 2),
             "df": df
         }
     return None
 
-# =======================
-# GRAFICO
-# =======================
-def crea_grafico(ticker, df, signal):
-    plt.figure(figsize=(10, 5))
-    plt.plot(df.index, df["Close"].astype(float), label="Close", color="blue")
-    plt.title(f"{ticker} - Segnale: {signal}")
+def trend_index():
+    sp500 = yf.download("^GSPC", period="3mo", interval="1d", progress=False)
+    if sp500.empty or len(sp500) < 50:
+        return "UNKNOWN"
+    last = float(sp500["Close"].iloc[-1])
+    ma50 = float(sp500["Close"].rolling(50).mean().iloc[-1])
+    return "UP" if last > ma50 else "DOWN"
+
+def crea_grafico(ticker, df, segnale):
+    plt.figure(figsize=(8,4))
+    plt.plot(df["Close"], label="Close")
+    plt.title(f"{ticker} | {segnale}")
     plt.xlabel("Data")
     plt.ylabel("Prezzo")
     plt.grid(True)
-
-    # Segnale BUY/SELL
-    if signal == "BUY":
-        plt.scatter(df.index[-1], float(df["Close"].iloc[-1].item()), color="green", marker="^", s=200, label="BUY")
-    elif signal == "SELL":
-        plt.scatter(df.index[-1], float(df["Close"].iloc[-1].item()), color="red", marker="v", s=200, label="SELL")
-
     plt.legend()
-    file_name = f"{ticker}_signal.png"
-    plt.tight_layout()
-    plt.savefig(file_name)
+    filename = f"{ticker}_grafico.png"
+    plt.savefig(filename)
     plt.close()
-    return file_name
+    return filename
 
 # =======================
 # MAIN
@@ -153,8 +144,14 @@ async def main():
     print(f"\n📊 Trend mercato: {mercato}\n")
 
     risultati = []
+
     for t in TICKERS:
         res = analizza_ticker(t)
+        if res:
+            risultati.append(res)
+
+    for t in SMALL_CAPS:
+        res = analizza_small_cap(t)
         if res:
             risultati.append(res)
 
@@ -162,21 +159,20 @@ async def main():
         print("❌ Nessun segnale valido")
         return
 
-    # Ranking per EDGE
-    risultati.sort(key=lambda x: x["edge"], reverse=True)
+    # Ranking per EDGE o perc_move
+    risultati.sort(key=lambda x: x.get("edge", abs(x.get("perc_move", 0))), reverse=True)
+
     messaggio = f"🔥 SEGNALI TROVATI ({len(risultati)} titoli):\n"
     for r in risultati:
-        messaggio += (
-            f"{r['ticker']} | {r['signal']} | "
-            f"RSI: {r['rsi']} | ATR: {r['atr']} | EDGE: {r['edge']}\n"
-        )
+        if "edge" in r:
+            messaggio += f"{r['ticker']} | {r['signal']} | RSI: {r['rsi']} | ATR: {r['atr']} | EDGE: {r['edge']}\n"
+        else:
+            messaggio += f"{r['ticker']} | {r['signal']} | % Move: {r['perc_move']}% | Vol ratio: {r['vol_ratio']}\n"
 
     print(messaggio)
-
-    # Invia testo su Telegram
     await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=messaggio)
 
-    # Invia grafici su Telegram
+    # Invia grafici
     for r in risultati:
         grafico = crea_grafico(r["ticker"], r["df"], r["signal"])
         with open(grafico, "rb") as f:
