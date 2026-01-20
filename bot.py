@@ -1,9 +1,10 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import asyncio
 import os
-from telegram import Bot
+from telegram import Bot, InputFile
 
 # =======================
 # CONFIG
@@ -115,9 +116,34 @@ def analizza_ticker(ticker):
             "signal": signal,
             "rsi": round(rsi_val, 2),
             "atr": round(atr_val, 2),
-            "edge": edge
+            "edge": edge,
+            "df": df
         }
     return None
+
+# =======================
+# GRAFICO
+# =======================
+def crea_grafico(ticker, df, signal):
+    plt.figure(figsize=(10, 5))
+    plt.plot(df.index, df["Close"].astype(float), label="Close", color="blue")
+    plt.title(f"{ticker} - Segnale: {signal}")
+    plt.xlabel("Data")
+    plt.ylabel("Prezzo")
+    plt.grid(True)
+
+    # Segnale BUY/SELL
+    if signal == "BUY":
+        plt.scatter(df.index[-1], float(df["Close"].iloc[-1].item()), color="green", marker="^", s=200, label="BUY")
+    elif signal == "SELL":
+        plt.scatter(df.index[-1], float(df["Close"].iloc[-1].item()), color="red", marker="v", s=200, label="SELL")
+
+    plt.legend()
+    file_name = f"{ticker}_signal.png"
+    plt.tight_layout()
+    plt.savefig(file_name)
+    plt.close()
+    return file_name
 
 # =======================
 # MAIN
@@ -136,7 +162,7 @@ async def main():
         print("❌ Nessun segnale valido")
         return
 
-    # Ranking
+    # Ranking per EDGE
     risultati.sort(key=lambda x: x["edge"], reverse=True)
     messaggio = f"🔥 SEGNALI TROVATI ({len(risultati)} titoli):\n"
     for r in risultati:
@@ -147,8 +173,15 @@ async def main():
 
     print(messaggio)
 
-    # Invio Telegram
+    # Invia testo su Telegram
     await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=messaggio)
+
+    # Invia grafici su Telegram
+    for r in risultati:
+        grafico = crea_grafico(r["ticker"], r["df"], r["signal"])
+        with open(grafico, "rb") as f:
+            await bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=InputFile(f))
+        os.remove(grafico)
 
 if __name__ == "__main__":
     asyncio.run(main())
