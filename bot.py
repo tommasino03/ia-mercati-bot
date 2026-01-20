@@ -15,12 +15,22 @@ INTERVALLO = "1d"
 
 
 # =======================
+# UTILS
+# =======================
+def scalar(x):
+    """Forza qualsiasi Series/DataFrame a float puro"""
+    return float(x.iloc[-1].item())
+
+
+# =======================
 # INDICATORI
 # =======================
 def rsi(series, period=14):
+    series = series.astype(float)
     delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
 
     avg_gain = gain.rolling(period).mean()
     avg_loss = loss.rolling(period).mean()
@@ -30,9 +40,9 @@ def rsi(series, period=14):
 
 
 def atr(df, period=14):
-    high = df["High"]
-    low = df["Low"]
-    close = df["Close"]
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    close = df["Close"].astype(float)
 
     tr = pd.concat([
         high - low,
@@ -44,7 +54,7 @@ def atr(df, period=14):
 
 
 # =======================
-# ANALISI MERCATO
+# TREND MERCATO
 # =======================
 def trend_index(ticker="^GSPC"):
     df = yf.download(ticker, period="6mo", interval="1d", progress=False)
@@ -54,10 +64,7 @@ def trend_index(ticker="^GSPC"):
     close = df["Close"].astype(float)
     ma50 = close.rolling(50).mean()
 
-    last_close = float(close.iloc[-1])
-    last_ma50 = float(ma50.iloc[-1])
-
-    return "UP" if last_close > last_ma50 else "DOWN"
+    return "UP" if scalar(close) > scalar(ma50) else "DOWN"
 
 
 # =======================
@@ -70,15 +77,15 @@ def calcola_edge(ticker):
 
     close = df["Close"].astype(float)
 
-    start = float(close.iloc[0])
-    end = float(close.iloc[-1])
+    start = float(close.iloc[0].item())
+    end = scalar(close)
 
     profitto = (end - start) / start * 100
-    drawdown = ((close.cummax() - close) / close.cummax()).max() * 100
+    drawdown = float(((close.cummax() - close) / close.cummax()).max().item())
     winrate = 55  # proxy conservativo
 
     edge = (profitto * 1.5) + winrate - (drawdown * 2)
-    return round(float(edge), 2)
+    return round(edge, 2)
 
 
 # =======================
@@ -92,15 +99,15 @@ def analizza_ticker(ticker):
     close = df["Close"].astype(float)
     volume = df["Volume"].astype(float)
 
-    rsi_val = rsi(close).iloc[-1]
-    atr_val = atr(df).iloc[-1]
+    rsi_val = scalar(rsi(close))
+    atr_val = scalar(atr(df))
 
-    vol_mean = volume.rolling(20).mean().iloc[-1]
-    vol_last = volume.iloc[-1]
-    volume_spike = bool(vol_last > vol_mean * 1.5)
+    vol_last = scalar(volume)
+    vol_mean = float(volume.rolling(20).mean().iloc[-1].item())
+
+    volume_spike = vol_last > vol_mean * 1.5
 
     edge = calcola_edge(ticker)
-
     if edge is None or edge < MIN_EDGE:
         return None
 
@@ -114,8 +121,8 @@ def analizza_ticker(ticker):
     return {
         "ticker": ticker,
         "signal": signal,
-        "rsi": round(float(rsi_val), 2),
-        "atr": round(float(atr_val), 2),
+        "rsi": round(rsi_val, 2),
+        "atr": round(atr_val, 2),
         "edge": edge
     }
 
@@ -138,7 +145,7 @@ async def main():
         print("❌ Nessun segnale valido")
         return
 
-    risultati = sorted(risultati, key=lambda x: x["edge"], reverse=True)
+    risultati.sort(key=lambda x: x["edge"], reverse=True)
 
     print("🔥 SEGNALI TROVATI:\n")
     for r in risultati:
