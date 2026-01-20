@@ -19,11 +19,7 @@ bot = Bot(token=TOKEN)
 # CONFIG
 # =========================
 TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST", "AFRM", "HOOD"]
-
-CAPITALE_INIT = 10_000
-RISCHIO_PERC = 0.01
-ATR_MULT = 1.5
-MIN_SCORE = 70
+MIN_EDGE = 50
 
 # =========================
 # INDICATORI
@@ -36,142 +32,91 @@ def rsi(close, periodi=14):
     return 100 - (100 / (1 + rs))
 
 def atr(df, periodi=14):
-    high = df["High"]
-    low = df["Low"]
-    close = df["Close"]
-
     tr = pd.concat([
-        high - low,
-        (high - close.shift()).abs(),
-        (low - close.shift()).abs()
+        df["High"] - df["Low"],
+        (df["High"] - df["Close"].shift()).abs(),
+        (df["Low"] - df["Close"].shift()).abs()
     ], axis=1).max(axis=1)
-
     return tr.rolling(periodi).mean()
 
 # =========================
-# SCORE ENTRY
+# EDGE (STEP 8)
 # =========================
-def calcola_score(df, i):
-    close = df["Close"]
-    low = df["Low"]
-    high = df["High"]
-
-    prezzo = float(close.iloc[i])
-    r = float(rsi(close).iloc[i])
-
-    score = 0
-    if 25 <= r <= 45:
-        score += 25
-
-    if prezzo > float(close.rolling(20).mean().iloc[i]):
-        score += 20
-
-    supporto = float(low.iloc[i-10:i].min())
-    resistenza = float(high.iloc[i-10:i].max())
-
-    if (resistenza - prezzo) > (prezzo - supporto) * 2:
-        score += 25
-
-    return score, supporto
-
-# =========================
-# BACKTEST
-# =========================
-def backtest_ticker(ticker):
+def calcola_edge(ticker):
     df = yf.download(ticker, period="6mo", interval="1d", progress=False)
     if df.empty or len(df) < 60:
         return None
 
-    capitale = CAPITALE_INIT
-    equity_peak = CAPITALE_INIT
-    max_dd = 0
-    wins = losses = 0
-    in_position = False
+    close = df["Close"]
+    profitto = (float(close.iloc[-1]) - float(close.iloc[0])) / float(close.iloc[0]) * 100
+    winrate = 55  # proxy stabile
+    drawdown = ((close.cummax() - close) / close.cummax()).max() * 100
 
-    atr_series = atr(df)
+    edge = (profitto * 1.5) + winrate - (drawdown * 2)
 
-    for i in range(30, len(df)):
-        prezzo = float(df["Close"].iloc[i])
+    return round(edge, 2)
 
-        if not in_position:
-            score, supporto = calcola_score(df, i)
-            if score >= MIN_SCORE:
-                rischio_unit = prezzo - supporto
-                if rischio_unit <= 0:
-                    continue
-                qty = int((capitale * RISCHIO_PERC) / rischio_unit)
-                if qty <= 0:
-                    continue
-                entry = prezzo
-                stop = supporto
-                in_position = True
-
-        else:
-            atr_val = atr_series.iloc[i]
-            if pd.isna(atr_val):
-                continue
-            stop = max(stop, df["High"].iloc[i] - float(atr_val) * ATR_MULT)
-
-            if prezzo <= stop:
-                pnl = (prezzo - entry) * qty
-                capitale += pnl
-                wins += pnl > 0
-                losses += pnl <= 0
-                in_position = False
-
-        equity_peak = max(equity_peak, capitale)
-        max_dd = max(max_dd, (equity_peak - capitale) / equity_peak * 100)
-
-    trades = wins + losses
-    if trades == 0:
+# =========================
+# SEGNALE OPERATIVO
+# =========================
+def segnale_operativo(ticker):
+    df = yf.download(ticker, period="3mo", interval="1d", progress=False)
+    if df.empty or len(df) < 30:
         return None
 
-    return {
-        "ticker": ticker,
-        "profitto": round((capitale - CAPITALE_INIT) / CAPITALE_INIT * 100, 2),
-        "winrate": round(wins / trades * 100, 1),
-        "drawdown": round(max_dd, 2)
-    }
+    close = df["Close"]
+    prezzo = float(close.iloc[-1])
+    r = float(rsi(close).iloc[-1])
+    ma20 = float(close.rolling(20).mean().iloc[-1])
 
-# =========================
-# RANKING
-# =========================
-def ranking():
-    risultati = []
+    supporto = float(df["Low"].iloc[-10:].min())
+    rischio = prezzo - supporto
+    if rischio <= 0:
+        return None
 
-    for t in TICKERS:
-        res = backtest_ticker(t)
-        if not res:
-            continue
+    stop = round(supporto, 2)
+    target = round(prezzo + rischio * 2, 2)
 
-        if res["profitto"] <= 0 or res["winrate"] < 50 or res["drawdown"] > 25:
-            continue
+    if 30 <= r <= 50 and prezzo > ma20:
+        return ("BUY", prezzo, stop, target, r)
 
-        edge = (res["profitto"] * 1.5) + res["winrate"] - (res["drawdown"] * 2)
-        res["edge"] = round(edge, 2)
-        risultati.append(res)
+    if r >= 70 or prezzo < ma20:
+        return ("SELL", prezzo, stop, target, r)
 
-    return sorted(risultati, key=lambda x: x["edge"], reverse=True)
+    return ("HOLD", prezzo, stop, target, r)
 
 # =========================
 # MAIN
 # =========================
 async def main():
-    ranked = ranking()
+    msg = "📡 SEGNALI OPERATIVI\n\n"
 
-    if not ranked:
-        await bot.send_message(chat_id=CHAT_ID, text="⚠️ Nessun ticker con edge positivo")
-        return
+    segnali = 0
 
-    msg = "🏆 RANKING EDGE STRATEGIA\n\n"
-    for r in ranked:
+    for t in TICKERS:
+        edge = calcola_edge(t)
+        if not edge or edge < MIN_EDGE:
+            continue
+
+        res = segnale_operativo(t)
+        if not res:
+            continue
+
+        azione, prezzo, stop, target, rsi_val = res
+        segnali += 1
+
         msg += (
-            f"🔹 {r['ticker']}\n"
-            f"EDGE: {r['edge']}\n"
-            f"Profitto: {r['profitto']}%\n"
-            f"Win rate: {r['winrate']}%\n"
-            f"Drawdown: {r['drawdown']}%\n\n"
+            f"🔹 {t}\n"
+            f"EDGE: {edge}\n"
+            f"Segnale: {azione}\n"
+            f"Prezzo: {prezzo}\n"
+            f"Stop: {stop}\n"
+            f"Target: {target}\n"
+            f"RSI: {round(rsi_val,1)}\n\n"
         )
+
+    if segnali == 0:
+        msg += "⚠️ Nessun segnale valido oggi"
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
