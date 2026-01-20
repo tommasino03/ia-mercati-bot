@@ -1,124 +1,152 @@
 import yfinance as yf
-import asyncio
-import os
 import pandas as pd
-from telegram import Bot
+import numpy as np
+import asyncio
 
-# =========================
-# ENV
-# =========================
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-if not TOKEN or not CHAT_ID:
-    raise ValueError("❌ TELEGRAM_TOKEN o TELEGRAM_CHAT_ID mancanti")
-
-bot = Bot(token=TOKEN)
-
-# =========================
+# =======================
 # CONFIG
-# =========================
-TICKERS = ["PLTR", "SOFI", "RIVN", "LCID", "UPST", "AFRM", "HOOD"]
-MIN_EDGE = 50
+# =======================
+TICKERS = ["AAPL", "MSFT", "NVDA", "AMD", "META"]
+RSI_BUY = 30
+RSI_SELL = 70
+MIN_EDGE = 10
+PERIODO = "6mo"
+INTERVALLO = "1d"
 
-# =========================
+
+# =======================
 # INDICATORI
-# =========================
-def rsi(close, periodi=14):
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0.0).rolling(periodi).mean()
-    loss = -delta.where(delta < 0, 0.0).rolling(periodi).mean()
-    rs = gain / loss
+# =======================
+def rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.rolling(period).mean()
+    avg_loss = loss.rolling(period).mean()
+
+    rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-def atr(df, periodi=14):
-    tr = pd.concat([
-        df["High"] - df["Low"],
-        (df["High"] - df["Close"].shift()).abs(),
-        (df["Low"] - df["Close"].shift()).abs()
-    ], axis=1).max(axis=1)
-    return tr.rolling(periodi).mean()
 
-# =========================
-# EDGE (STEP 8)
-# =========================
-def calcola_edge(ticker):
+def atr(df, period=14):
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs()
+    ], axis=1).max(axis=1)
+
+    return tr.rolling(period).mean()
+
+
+# =======================
+# ANALISI MERCATO
+# =======================
+def trend_index(ticker="^GSPC"):
     df = yf.download(ticker, period="6mo", interval="1d", progress=False)
+    if df.empty or len(df) < 50:
+        return "NEUTRAL"
+
+    close = df["Close"].astype(float)
+    ma50 = close.rolling(50).mean()
+
+    last_close = float(close.iloc[-1])
+    last_ma50 = float(ma50.iloc[-1])
+
+    return "UP" if last_close > last_ma50 else "DOWN"
+
+
+# =======================
+# EDGE STATISTICO
+# =======================
+def calcola_edge(ticker):
+    df = yf.download(ticker, period=PERIODO, interval=INTERVALLO, progress=False)
     if df.empty or len(df) < 60:
         return None
 
-    close = df["Close"]
-    profitto = (float(close.iloc[-1]) - float(close.iloc[0])) / float(close.iloc[0]) * 100
-    winrate = 55  # proxy stabile
+    close = df["Close"].astype(float)
+
+    start = float(close.iloc[0])
+    end = float(close.iloc[-1])
+
+    profitto = (end - start) / start * 100
     drawdown = ((close.cummax() - close) / close.cummax()).max() * 100
+    winrate = 55  # proxy conservativo
 
     edge = (profitto * 1.5) + winrate - (drawdown * 2)
+    return round(float(edge), 2)
 
-    return round(edge, 2)
 
-# =========================
-# SEGNALE OPERATIVO
-# =========================
-def segnale_operativo(ticker):
-    df = yf.download(ticker, period="3mo", interval="1d", progress=False)
-    if df.empty or len(df) < 30:
+# =======================
+# ANALISI TICKER
+# =======================
+def analizza_ticker(ticker):
+    df = yf.download(ticker, period=PERIODO, interval=INTERVALLO, progress=False)
+    if df.empty or len(df) < 50:
         return None
 
-    close = df["Close"]
-    prezzo = float(close.iloc[-1])
-    r = float(rsi(close).iloc[-1])
-    ma20 = float(close.rolling(20).mean().iloc[-1])
+    close = df["Close"].astype(float)
+    volume = df["Volume"].astype(float)
 
-    supporto = float(df["Low"].iloc[-10:].min())
-    rischio = prezzo - supporto
-    if rischio <= 0:
+    rsi_val = rsi(close).iloc[-1]
+    atr_val = atr(df).iloc[-1]
+
+    vol_mean = volume.rolling(20).mean().iloc[-1]
+    vol_last = volume.iloc[-1]
+    volume_spike = bool(vol_last > vol_mean * 1.5)
+
+    edge = calcola_edge(ticker)
+
+    if edge is None or edge < MIN_EDGE:
         return None
 
-    stop = round(supporto, 2)
-    target = round(prezzo + rischio * 2, 2)
+    if rsi_val <= RSI_BUY and volume_spike:
+        signal = "BUY"
+    elif rsi_val >= RSI_SELL:
+        signal = "SELL"
+    else:
+        return None
 
-    if 30 <= r <= 50 and prezzo > ma20:
-        return ("BUY", prezzo, stop, target, r)
+    return {
+        "ticker": ticker,
+        "signal": signal,
+        "rsi": round(float(rsi_val), 2),
+        "atr": round(float(atr_val), 2),
+        "edge": edge
+    }
 
-    if r >= 70 or prezzo < ma20:
-        return ("SELL", prezzo, stop, target, r)
 
-    return ("HOLD", prezzo, stop, target, r)
-
-# =========================
+# =======================
 # MAIN
-# =========================
+# =======================
 async def main():
-    msg = "📡 SEGNALI OPERATIVI\n\n"
+    mercato = trend_index()
+    print(f"\n📊 Trend mercato: {mercato}\n")
 
-    segnali = 0
+    risultati = []
 
     for t in TICKERS:
-        edge = calcola_edge(t)
-        if not edge or edge < MIN_EDGE:
-            continue
+        res = analizza_ticker(t)
+        if res:
+            risultati.append(res)
 
-        res = segnale_operativo(t)
-        if not res:
-            continue
+    if not risultati:
+        print("❌ Nessun segnale valido")
+        return
 
-        azione, prezzo, stop, target, rsi_val = res
-        segnali += 1
+    risultati = sorted(risultati, key=lambda x: x["edge"], reverse=True)
 
-        msg += (
-            f"🔹 {t}\n"
-            f"EDGE: {edge}\n"
-            f"Segnale: {azione}\n"
-            f"Prezzo: {prezzo}\n"
-            f"Stop: {stop}\n"
-            f"Target: {target}\n"
-            f"RSI: {round(rsi_val,1)}\n\n"
+    print("🔥 SEGNALI TROVATI:\n")
+    for r in risultati:
+        print(
+            f"{r['ticker']} | {r['signal']} | "
+            f"RSI: {r['rsi']} | ATR: {r['atr']} | EDGE: {r['edge']}"
         )
 
-    if segnali == 0:
-        msg += "⚠️ Nessun segnale valido oggi"
-
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 if __name__ == "__main__":
     asyncio.run(main())
