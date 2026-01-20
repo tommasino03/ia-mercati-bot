@@ -2,6 +2,7 @@ import yfinance as yf
 import asyncio
 import os
 from telegram import Bot
+import pandas as pd
 
 # =========================
 # ENV
@@ -25,23 +26,25 @@ ATR_MULT = 1.5
 MIN_SCORE = 70
 
 # =========================
-# INDICATORI
+# INDICATORI SICURI
 # =========================
 def rsi(close, periodi=14):
     delta = close.diff()
-    gain = delta.clip(lower=0).rolling(periodi).mean()
-    loss = -delta.clip(upper=0).rolling(periodi).mean()
+    gain = delta.where(delta > 0, 0.0).rolling(periodi).mean()
+    loss = -delta.where(delta < 0, 0.0).rolling(periodi).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
 def atr(df, periodi=14):
-    tr = (
-        (df["High"] - df["Low"])
-        .to_frame("hl")
-        .join((df["High"] - df["Close"].shift()).abs().to_frame("hc"))
-        .join((df["Low"] - df["Close"].shift()).abs().to_frame("lc"))
-        .max(axis=1)
-    )
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(periodi).mean()
 
 # =========================
@@ -56,9 +59,12 @@ def calcola_score(df, i):
     r = float(rsi(close).iloc[i])
 
     score = 0
+
     if 25 <= r <= 45:
         score += 25
-    if prezzo > float(close.rolling(20).mean().iloc[i]):
+
+    ma20 = float(close.rolling(20).mean().iloc[i])
+    if prezzo > ma20:
         score += 20
 
     supporto = float(low.iloc[i-10:i].min())
@@ -74,6 +80,7 @@ def calcola_score(df, i):
 # =========================
 def backtest_ticker(ticker):
     df = yf.download(ticker, period="6mo", interval="1d", progress=False)
+
     if df.empty or len(df) < 60:
         return None
 
@@ -82,8 +89,8 @@ def backtest_ticker(ticker):
     max_dd = 0
     wins = 0
     losses = 0
-    in_position = False
 
+    in_position = False
     entry = stop = qty = 0
 
     atr_series = atr(df)
@@ -93,29 +100,39 @@ def backtest_ticker(ticker):
 
         if not in_position:
             score, supporto = calcola_score(df, i)
+
             if score >= MIN_SCORE:
                 rischio = capitale * RISCHIO_PERC
                 stop = supporto
                 rischio_unit = prezzo - stop
+
                 if rischio_unit <= 0:
                     continue
+
                 qty = int(rischio / rischio_unit)
                 if qty <= 0:
                     continue
+
                 entry = prezzo
                 in_position = True
 
         else:
-            atr_val = float(atr_series.iloc[i])
+            atr_val = atr_series.iloc[i]
+            if pd.isna(atr_val):
+                continue
+
+            atr_val = float(atr_val)
             stop = max(stop, df["High"].iloc[i] - atr_val * ATR_MULT)
 
             if prezzo <= stop:
                 pnl = (prezzo - entry) * qty
                 capitale += pnl
+
                 if pnl > 0:
                     wins += 1
                 else:
                     losses += 1
+
                 in_position = False
 
         equity_peak = max(equity_peak, capitale)
