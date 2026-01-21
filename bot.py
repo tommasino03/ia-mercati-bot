@@ -2,37 +2,38 @@ import os
 import asyncio
 import yfinance as yf
 import pandas as pd
+import numpy as np
 from telegram import Bot
 
-# =========================
+# ======================
 # CONFIG
-# =========================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# ======================
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    raise ValueError("❌ TELEGRAM_TOKEN o TELEGRAM_CHAT_ID mancanti")
+if not TOKEN or not CHAT_ID:
+    raise ValueError("❌ Token Telegram mancanti")
 
-bot = Bot(token=TELEGRAM_TOKEN)
+bot = Bot(token=TOKEN)
 
-LARGE_CAPS = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA"]
-SMALL_CAPS = ["PLTR", "FUBO", "ROKU", "SNAP", "ZM"]
+TICKERS = [
+    "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA",
+    "NVDA", "META", "AMD", "PLTR", "ROKU"
+]
 
-RSI_BUY = 35
-RSI_SELL = 65
-VOL_SPIKE = 1.8
+RISK_REWARD = 2.0
+MIN_CONFIDENCE = 65  # %
 
-# =========================
+# ======================
 # UTILS
-# =========================
+# ======================
 def clean_df(df):
-    """Rende il DataFrame compatibile anche con colonne MultiIndex"""
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df.dropna()
 
-def last(series):
-    return float(series.values[-1])
+def last(x):
+    return float(np.array(x)[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -43,93 +44,115 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# =========================
+# ======================
 # TREND MERCATO
-# =========================
-def trend_mercato():
-    df = yf.download("^GSPC", period="3mo", interval="1d", progress=False)
-    if df.empty or len(df) < 50:
+# ======================
+def market_trend():
+    df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
+    if df.empty:
         return "NEUTRAL"
 
     df = clean_df(df)
     close = df["Close"].astype(float)
+
     ma50 = close.rolling(50).mean()
+    ma200 = close.rolling(200).mean()
 
-    return "UP" if last(close) > last(ma50) else "DOWN"
+    if last(ma50) > last(ma200):
+        return "UP"
+    elif last(ma50) < last(ma200):
+        return "DOWN"
+    return "NEUTRAL"
 
-# =========================
+# ======================
 # ANALISI TITOLO
-# =========================
-def analizza_titolo(ticker):
-    df = yf.download(ticker, period="3mo", interval="1d", progress=False)
-    if df.empty or len(df) < 30:
+# ======================
+def analyze(ticker, trend):
+    df = yf.download(ticker, period="4mo", interval="1d", progress=False)
+    if df.empty or len(df) < 60:
         return None
 
     df = clean_df(df)
-
     close = df["Close"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
     volume = df["Volume"].astype(float)
 
-    ma20 = close.rolling(20).mean()
     rsi_val = last(rsi(close))
-    vol_last = last(volume)
-    vol_mean = float(volume.rolling(20).mean().iloc[-1])
+    ma20 = close.rolling(20).mean()
+    ma50 = close.rolling(50).mean()
 
-    volume_spike = vol_last > vol_mean * VOL_SPIKE
+    atr = (high - low).rolling(14).mean()
+    atr_val = last(atr)
 
     signal = None
-    score = 0
+    confidence = 0
 
-    if last(close) > last(ma20) and rsi_val < RSI_BUY and volume_spike:
-        signal = "BUY"
-        score = round((RSI_BUY - rsi_val) + (vol_last / vol_mean), 2)
+    # ======================
+    # LOGICA TRADE
+    # ======================
+    if trend == "UP":
+        if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
+            signal = "BUY"
+            confidence = 70 + (45 - rsi_val)
 
-    elif last(close) < last(ma20) and rsi_val > RSI_SELL and volume_spike:
-        signal = "SELL"
-        score = round((rsi_val - RSI_SELL) + (vol_last / vol_mean), 2)
+    elif trend == "DOWN":
+        if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
+            signal = "SELL"
+            confidence = 70 + (rsi_val - 55)
 
-    if signal:
-        return {
-            "ticker": ticker,
-            "signal": signal,
-            "rsi": round(rsi_val, 2),
-            "vol_ratio": round(vol_last / vol_mean, 2),
-            "score": score
-        }
+    if not signal or confidence < MIN_CONFIDENCE:
+        return None
 
-    return None
+    entry = last(close)
 
-# =========================
+    if signal == "BUY":
+        stop = entry - atr_val
+        target = entry + atr_val * RISK_REWARD
+    else:
+        stop = entry + atr_val
+        target = entry - atr_val * RISK_REWARD
+
+    return {
+        "ticker": ticker,
+        "signal": signal,
+        "entry": round(entry, 2),
+        "stop": round(stop, 2),
+        "target": round(target, 2),
+        "confidence": round(min(confidence, 95), 1)
+    }
+
+# ======================
 # MAIN
-# =========================
+# ======================
 async def main():
-    trend = trend_mercato()
-    print(f"\n📊 Trend mercato: {trend}\n")
+    trend = market_trend()
+    results = []
 
-    segnali = []
-
-    for t in LARGE_CAPS + SMALL_CAPS:
-        res = analizza_titolo(t)
+    for t in TICKERS:
+        res = analyze(t, trend)
         if res:
-            segnali.append(res)
+            results.append(res)
 
-    if not segnali:
+    if not results:
         await bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text="📭 Nessun segnale operativo oggi"
+            chat_id=CHAT_ID,
+            text=f"📭 Nessun trade valido oggi\nTrend mercato: {trend}"
         )
         return
 
-    segnali.sort(key=lambda x: x["score"], reverse=True)
+    msg = f"🚀 SEGNALI OPERATIVI\nTrend mercato: {trend}\n\n"
 
-    msg = f"🔥 SEGNALI OPERATIVI ({trend})\n\n"
-    for s in segnali:
+    for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
         msg += (
-            f"{s['ticker']} | {s['signal']}\n"
-            f"RSI: {s['rsi']} | Vol x{s['vol_ratio']} | Score: {s['score']}\n\n"
+            f"📌 {r['ticker']} — {r['signal']}\n"
+            f"Entry: {r['entry']}\n"
+            f"Stop: {r['stop']}\n"
+            f"Target: {r['target']}\n"
+            f"Confidenza: {r['confidence']}%\n\n"
         )
 
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
+    await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 if __name__ == "__main__":
     asyncio.run(main())
