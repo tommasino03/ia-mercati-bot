@@ -4,6 +4,8 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from telegram import Bot
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 
 # ======================
 # CONFIG
@@ -21,8 +23,8 @@ TICKERS = [
     "NVDA", "META", "AMD", "PLTR", "ROKU"
 ]
 
+CONFIDENCE_THRESHOLD = 0.65
 RISK_REWARD = 2.0
-MIN_CONFIDENCE = 65  # %
 
 # ======================
 # UTILS
@@ -33,7 +35,7 @@ def clean_df(df):
     return df.dropna()
 
 def last(x):
-    return float(np.array(x)[-1])
+    return float(np.asarray(x)[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -45,103 +47,112 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ======================
-# TREND MERCATO
+# FEATURE ENGINEERING
 # ======================
-def market_trend():
-    df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
-    if df.empty:
-        return "NEUTRAL"
-
-    df = clean_df(df)
-    close = df["Close"].astype(float)
-
-    ma50 = close.rolling(50).mean()
-    ma200 = close.rolling(200).mean()
-
-    if last(ma50) > last(ma200):
-        return "UP"
-    elif last(ma50) < last(ma200):
-        return "DOWN"
-    return "NEUTRAL"
-
-# ======================
-# ANALISI TITOLO
-# ======================
-def analyze(ticker, trend):
-    df = yf.download(ticker, period="4mo", interval="1d", progress=False)
-    if df.empty or len(df) < 60:
-        return None
-
-    df = clean_df(df)
+def build_features(df):
     close = df["Close"].astype(float)
     high = df["High"].astype(float)
     low = df["Low"].astype(float)
     volume = df["Volume"].astype(float)
 
-    rsi_val = last(rsi(close))
-    ma20 = close.rolling(20).mean()
-    ma50 = close.rolling(50).mean()
+    df_feat = pd.DataFrame()
+    df_feat["rsi"] = rsi(close)
+    df_feat["ma20"] = close.rolling(20).mean()
+    df_feat["ma50"] = close.rolling(50).mean()
+    df_feat["price_ma20"] = close / df_feat["ma20"]
+    df_feat["price_ma50"] = close / df_feat["ma50"]
+    df_feat["vol_ratio"] = volume / volume.rolling(20).mean()
+    df_feat["atr"] = (high - low).rolling(14).mean()
 
-    atr = (high - low).rolling(14).mean()
-    atr_val = last(atr)
+    df_feat["future_return"] = close.shift(-5) / close - 1
+    df_feat["target"] = (df_feat["future_return"] > 0).astype(int)
 
-    signal = None
-    confidence = 0
+    return df_feat.dropna()
 
-    # ======================
-    # LOGICA TRADE
-    # ======================
-    if trend == "UP":
-        if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
-            signal = "BUY"
-            confidence = 70 + (45 - rsi_val)
+# ======================
+# TRAIN ML MODEL
+# ======================
+def train_model(ticker):
+    df = yf.download(ticker, period="2y", interval="1d", progress=False)
+    if df.empty or len(df) < 200:
+        return None, None
 
-    elif trend == "DOWN":
-        if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
-            signal = "SELL"
-            confidence = 70 + (rsi_val - 55)
+    df = clean_df(df)
+    data = build_features(df)
 
-    if not signal or confidence < MIN_CONFIDENCE:
+    X = data.drop(columns=["future_return", "target"])
+    y = data["target"]
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    model = LogisticRegression(max_iter=500)
+    model.fit(X_scaled, y)
+
+    return model, scaler
+
+# ======================
+# ANALISI LIVE
+# ======================
+def analyze_ticker(ticker):
+    model, scaler = train_model(ticker)
+    if not model:
         return None
 
-    entry = last(close)
+    df = yf.download(ticker, period="4mo", interval="1d", progress=False)
+    df = clean_df(df)
 
-    if signal == "BUY":
+    feat = build_features(df)
+    latest = feat.iloc[-1:].drop(columns=["future_return", "target"])
+
+    X_live = scaler.transform(latest)
+    prob_up = model.predict_proba(X_live)[0][1]
+
+    close = df["Close"].astype(float)
+    atr = (df["High"] - df["Low"]).rolling(14).mean()
+
+    entry = last(close)
+    atr_val = last(atr)
+
+    if prob_up >= CONFIDENCE_THRESHOLD:
+        signal = "BUY"
         stop = entry - atr_val
         target = entry + atr_val * RISK_REWARD
-    else:
+    elif prob_up <= 1 - CONFIDENCE_THRESHOLD:
+        signal = "SELL"
         stop = entry + atr_val
         target = entry - atr_val * RISK_REWARD
+    else:
+        return None
 
     return {
         "ticker": ticker,
         "signal": signal,
+        "confidence": round(prob_up * 100, 1),
         "entry": round(entry, 2),
         "stop": round(stop, 2),
-        "target": round(target, 2),
-        "confidence": round(min(confidence, 95), 1)
+        "target": round(target, 2)
     }
 
 # ======================
 # MAIN
 # ======================
 async def main():
-    trend = market_trend()
     results = []
 
     for t in TICKERS:
-        res = analyze(t, trend)
+        res = analyze_ticker(t)
         if res:
             results.append(res)
 
     if not results:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessun trade valido oggi\nTrend mercato: {trend}"
+            text="📭 Nessun segnale ML valido oggi"
         )
         return
 
-    msg = f"🚀 SEGNALI OPERATIVI\nTrend mercato: {trend}\n\n"
+    msg = "🤖 SEGNALI ML (Adaptive)\n\n"
 
     for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
         msg += (
@@ -149,7 +160,7 @@ async def main():
             f"Entry: {r['entry']}\n"
             f"Stop: {r['stop']}\n"
             f"Target: {r['target']}\n"
-            f"Confidenza: {r['confidence']}%\n\n"
+            f"Probabilità: {r['confidence']}%\n\n"
         )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
