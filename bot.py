@@ -15,11 +15,9 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
 
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# Titoli
 LARGE_CAPS = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA"]
 SMALL_CAPS = ["PLTR", "FUBO", "ROKU", "SNAP", "ZM"]
 
-# Parametri
 RSI_BUY = 35
 RSI_SELL = 65
 VOL_SPIKE = 1.8
@@ -27,8 +25,14 @@ VOL_SPIKE = 1.8
 # =========================
 # UTILS
 # =========================
+def clean_df(df):
+    """Rende il DataFrame compatibile anche con colonne MultiIndex"""
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df.dropna()
+
 def last(series):
-    return float(series.iloc[-1])
+    return float(series.values[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -46,17 +50,22 @@ def trend_mercato():
     df = yf.download("^GSPC", period="3mo", interval="1d", progress=False)
     if df.empty or len(df) < 50:
         return "NEUTRAL"
+
+    df = clean_df(df)
     close = df["Close"].astype(float)
     ma50 = close.rolling(50).mean()
+
     return "UP" if last(close) > last(ma50) else "DOWN"
 
 # =========================
-# ANALISI TITOLO (VALE PER TUTTI)
+# ANALISI TITOLO
 # =========================
 def analizza_titolo(ticker):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
     if df.empty or len(df) < 30:
         return None
+
+    df = clean_df(df)
 
     close = df["Close"].astype(float)
     volume = df["Volume"].astype(float)
@@ -111,7 +120,6 @@ async def main():
         )
         return
 
-    # Ranking per forza segnale
     segnali.sort(key=lambda x: x["score"], reverse=True)
 
     msg = f"🔥 SEGNALI OPERATIVI ({trend})\n\n"
