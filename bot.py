@@ -1,5 +1,4 @@
 import os
-import json
 import asyncio
 import datetime
 import yfinance as yf
@@ -20,7 +19,6 @@ bot = Bot(token=TOKEN)
 
 CAPITAL = 10_000
 RISK_PER_TRADE = 0.01
-MAX_DRAWDOWN = -0.05
 RISK_REWARD = 2.0
 
 TICKERS = [
@@ -28,19 +26,33 @@ TICKERS = [
     "NVDA", "META", "AMD", "PLTR", "ROKU"
 ]
 
-LOG_FILE = "trade_log.json"
+# ======================
+# UTILS ROBUSTI
+# ======================
+def clean_df(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df.dropna()
 
-# ======================
-# UTILS SICURI
-# ======================
 def scalar(x):
-    """Restituisce SEMPRE un float sicuro"""
+    """
+    Estrae SEMPRE un float:
+    - Series -> ultimo valore
+    - DataFrame -> ultima cella
+    """
     if x is None:
         return None
+
+    if isinstance(x, pd.DataFrame):
+        if x.empty:
+            return None
+        return float(x.values[-1][0])
+
     if isinstance(x, pd.Series):
         if x.empty:
             return None
-        return float(x.dropna().iloc[-1])
+        return float(x.values[-1])
+
     return float(x)
 
 def rsi(series, period=14):
@@ -52,24 +64,6 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-def load_log():
-    if not os.path.exists(LOG_FILE):
-        return []
-    with open(LOG_FILE, "r") as f:
-        return json.load(f)
-
-def save_log(data):
-    with open(LOG_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-
-# ======================
-# RISK CONTROL
-# ======================
-def drawdown_exceeded():
-    log = load_log()
-    pnl = sum(t.get("pnl", 0) for t in log)
-    return pnl / CAPITAL <= MAX_DRAWDOWN
-
 # ======================
 # ANALISI TITOLO
 # ======================
@@ -78,7 +72,7 @@ def analyze(ticker):
     if df.empty or len(df) < 80:
         return None
 
-    df = df.dropna()
+    df = clean_df(df)
 
     close = df["Close"]
     high = df["High"]
@@ -107,8 +101,8 @@ def analyze(ticker):
     if last_rsi > 50:
         return None
 
-    size = int((CAPITAL * RISK_PER_TRADE) / last_atr)
-    if size <= 0:
+    position_size = int((CAPITAL * RISK_PER_TRADE) / last_atr)
+    if position_size <= 0:
         return None
 
     return {
@@ -116,7 +110,7 @@ def analyze(ticker):
         "entry": round(last_close, 2),
         "stop": round(last_close - last_atr, 2),
         "target": round(last_close + last_atr * RISK_REWARD, 2),
-        "size": size,
+        "size": position_size,
         "confidence": round(70 + (45 - last_rsi), 1)
     }
 
@@ -124,44 +118,31 @@ def analyze(ticker):
 # MAIN
 # ======================
 async def main():
-    if drawdown_exceeded():
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text="🛑 Trading BLOCCATO\nDrawdown massimo raggiunto"
-        )
-        return
+    trades = []
 
-    candidates = []
     for t in TICKERS:
         res = analyze(t)
         if res:
-            candidates.append(res)
+            trades.append(res)
 
-    if not candidates:
+    if not trades:
         await bot.send_message(
             chat_id=CHAT_ID,
             text="📭 Nessun trade valido oggi"
         )
         return
 
-    best = sorted(candidates, key=lambda x: x["confidence"], reverse=True)[0]
-
-    log = load_log()
-    log.append({
-        "date": str(datetime.date.today()),
-        **best
-    })
-    save_log(log)
+    best = sorted(trades, key=lambda x: x["confidence"], reverse=True)[0]
 
     msg = (
-        "🏆 **TRADE SELEZIONATO**\n\n"
+        "🚀 **MIGLIOR TRADE DEL GIORNO**\n\n"
         f"{best['ticker']}\n"
         f"Entry: {best['entry']}\n"
         f"Stop: {best['stop']}\n"
         f"Target: {best['target']}\n"
         f"Size: {best['size']}\n"
         f"Confidenza: {best['confidence']}%\n\n"
-        "⚠️ Rispetta SEMPRE stop e size"
+        "⚠️ Rispetta SEMPRE lo stop"
     )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
