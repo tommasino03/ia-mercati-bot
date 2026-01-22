@@ -23,7 +23,6 @@ TICKERS = [
 
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 65  # %
-INTRADAY_THRESHOLD = 2.0  # % movimento veloce per alert
 
 # ======================
 # UTILS
@@ -34,8 +33,7 @@ def clean_df(df):
     return df.dropna()
 
 def last(x):
-    arr = np.array(x)
-    return float(arr[-1])
+    return float(x.iloc[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -53,10 +51,12 @@ def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
     if df.empty:
         return "NEUTRAL"
+
     df = clean_df(df)
     close = df["Close"].astype(float)
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
+
     if last(ma50) > last(ma200):
         return "UP"
     elif last(ma50) < last(ma200):
@@ -81,9 +81,6 @@ def analyze(ticker, trend):
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
     atr_val = last((high - low).rolling(14).mean())
-    vol_mean = volume.rolling(20).mean()
-    vol_last = last(volume)
-    volume_spike = vol_last > last(vol_mean) * 1.5
 
     signal = None
     confidence = 0
@@ -97,14 +94,6 @@ def analyze(ticker, trend):
         if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
             signal = "SELL"
             confidence = 70 + (rsi_val - 55)
-
-    # Opportunità volume/spike (trade forti)
-    if volume_spike and rsi_val < 40:
-        signal = "BUY"
-        confidence = max(confidence, 80)
-    elif volume_spike and rsi_val > 60:
-        signal = "SELL"
-        confidence = max(confidence, 80)
 
     if not signal or confidence < MIN_CONFIDENCE:
         return None
@@ -127,28 +116,25 @@ def analyze(ticker, trend):
     }
 
 # ======================
-# ALERT INTRADAY
+# CHECK INTRADAY (una volta sola)
 # ======================
-async def intraday_alerts():
-    for ticker in TICKERS:
-        df = yf.download(ticker, period="5d", interval="15m", progress=False)
-        if df.empty:
-            continue
-        df = clean_df(df)
-        close = df["Close"].astype(float)
-        last_price = last(close)
-        prev_price = float(np.array(close)[-2])
-        move_pct = (last_price - prev_price) / prev_price * 100
+def intraday_check(ticker):
+    df = yf.download(ticker, period="7d", interval="1h", progress=False)
+    if df.empty:
+        return None
 
-        if abs(move_pct) >= INTRADAY_THRESHOLD:
-            signal = "BUY" if move_pct > 0 else "SELL"
-            msg = (
-                f"⚡ ALERT INTRADAY {ticker}\n"
-                f"Movimento rapido: {move_pct:.2f}%\n"
-                f"Segnale: {signal}\n"
-                f"Prezzo attuale: {last_price}"
-            )
-            await bot.send_message(chat_id=CHAT_ID, text=msg)
+    df = clean_df(df)
+    close = df["Close"].astype(float)
+    ma20 = close.rolling(20).mean()
+
+    last_price = last(close)
+    last_ma20 = last(ma20)
+
+    if last_price > last_ma20:
+        return f"{ticker}: prezzo sopra MA20 intraday 🔼"
+    elif last_price < last_ma20:
+        return f"{ticker}: prezzo sotto MA20 intraday 🔽"
+    return None
 
 # ======================
 # MAIN
@@ -157,41 +143,33 @@ async def main():
     trend = market_trend()
     results = []
 
+    # segnali giornalieri
     for t in TICKERS:
         res = analyze(t, trend)
         if res:
             results.append(res)
 
-    if not results:
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"📭 Nessun trade valido oggi\nTrend mercato: {trend}"
-        )
-        return
+    msg = f"🚀 SEGNALI OPERATIVI\nTrend mercato: {trend}\n\n"
 
-    # Ordina per confidenza e seleziona trade migliore
-    results_sorted = sorted(results, key=lambda x: x["confidence"], reverse=True)
-    best_trade = results_sorted[0]
+    if results:
+        for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
+            msg += (
+                f"📌 {r['ticker']} — {r['signal']}\n"
+                f"Entry: {r['entry']}\n"
+                f"Stop: {r['stop']}\n"
+                f"Target: {r['target']}\n"
+                f"Confidenza: {r['confidence']}%\n\n"
+            )
+    else:
+        msg += "📭 Nessun trade valido oggi\n"
 
-    # Messaggio Telegram principale
-    msg = f"🚀 TRADE MIGLIORE OGGI\nTrend mercato: {trend}\n\n"
-    msg += (
-        f"📌 {best_trade['ticker']} — {best_trade['signal']}\n"
-        f"Entry: {best_trade['entry']}\n"
-        f"Stop: {best_trade['stop']}\n"
-        f"Target: {best_trade['target']}\n"
-        f"Confidenza: {best_trade['confidence']}%\n\n"
-    )
-    msg += "📊 Ranking completo dei trade:\n"
-    for r in results_sorted:
-        msg += f"{r['ticker']}: {r['signal']} — Conf: {r['confidence']}%\n"
+    # check intraday (una sola volta)
+    for t in TICKERS:
+        alert = intraday_check(t)
+        if alert:
+            msg += f"⏱ {alert}\n"
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
-
-    # Esegui alert intraday ogni 15 minuti
-    while True:
-        await intraday_alerts()
-        await asyncio.sleep(900)  # 900s = 15 minuti
 
 if __name__ == "__main__":
     asyncio.run(main())
