@@ -23,6 +23,7 @@ TICKERS = [
 
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 65  # %
+INTRADAY_VOLUME_MULTIPLIER = 1.5
 
 # ======================
 # UTILS
@@ -51,12 +52,10 @@ def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
     if df.empty:
         return "NEUTRAL"
-
     df = clean_df(df)
     close = df["Close"].astype(float)
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
-
     if last(ma50) > last(ma200):
         return "UP"
     elif last(ma50) < last(ma200):
@@ -102,13 +101,16 @@ def analyze(ticker, trend):
         stop = entry + atr_val
         target = entry - atr_val * RISK_REWARD
 
+    edge = abs(target - entry) / atr_val if atr_val != 0 else 0
+
     return {
         "ticker": ticker,
         "signal": signal,
         "entry": round(entry, 2),
         "stop": round(stop, 2),
         "target": round(target, 2),
-        "confidence": round(min(confidence, 95), 1)
+        "confidence": round(min(confidence, 95), 1),
+        "edge": round(edge, 2)
     }
 
 # ======================
@@ -137,7 +139,7 @@ def intraday_alert(ticker):
     elif last_price < last_ma20:
         alerts.append("prezzo sotto MA20 intraday 🔽")
 
-    if last_vol > last_vol_mean * 1.5:
+    if last_vol > last_vol_mean * INTRADAY_VOLUME_MULTIPLIER:
         alerts.append("volume anomalo 🔊")
 
     if alerts:
@@ -151,22 +153,26 @@ async def main():
     trend = market_trend()
     results = []
 
-    # segnali giornalieri
+    # segnali giornalieri con ranking
     for t in TICKERS:
         res = analyze(t, trend)
         if res:
             results.append(res)
 
-    msg = f"🚀 SEGNALI OPERATIVI\nTrend mercato: {trend}\n\n"
+    # ordina per edge e confidenza
+    results_sorted = sorted(results, key=lambda x: (x["edge"], x["confidence"]), reverse=True)
 
-    if results:
-        for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
+    msg = f"🚀 SEGNALI OPERATIVI HYPER-POWER\nTrend mercato: {trend}\n\n"
+
+    if results_sorted:
+        for r in results_sorted:
             msg += (
                 f"📌 {r['ticker']} — {r['signal']}\n"
                 f"Entry: {r['entry']}\n"
                 f"Stop: {r['stop']}\n"
                 f"Target: {r['target']}\n"
-                f"Confidenza: {r['confidence']}%\n\n"
+                f"Confidenza: {r['confidence']}%\n"
+                f"Edge operativo: {r['edge']}\n\n"
             )
     else:
         msg += "📭 Nessun trade valido oggi\n"
