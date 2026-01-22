@@ -23,6 +23,7 @@ TICKERS = [
 
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 65  # %
+INTRADAY_THRESHOLD = 2.0  # % movimento veloce per alert
 
 # ======================
 # UTILS
@@ -52,12 +53,10 @@ def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
     if df.empty:
         return "NEUTRAL"
-
     df = clean_df(df)
     close = df["Close"].astype(float)
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
-
     if last(ma50) > last(ma200):
         return "UP"
     elif last(ma50) < last(ma200):
@@ -128,6 +127,30 @@ def analyze(ticker, trend):
     }
 
 # ======================
+# ALERT INTRADAY
+# ======================
+async def intraday_alerts():
+    for ticker in TICKERS:
+        df = yf.download(ticker, period="5d", interval="15m", progress=False)
+        if df.empty:
+            continue
+        df = clean_df(df)
+        close = df["Close"].astype(float)
+        last_price = last(close)
+        prev_price = float(np.array(close)[-2])
+        move_pct = (last_price - prev_price) / prev_price * 100
+
+        if abs(move_pct) >= INTRADAY_THRESHOLD:
+            signal = "BUY" if move_pct > 0 else "SELL"
+            msg = (
+                f"⚡ ALERT INTRADAY {ticker}\n"
+                f"Movimento rapido: {move_pct:.2f}%\n"
+                f"Segnale: {signal}\n"
+                f"Prezzo attuale: {last_price}"
+            )
+            await bot.send_message(chat_id=CHAT_ID, text=msg)
+
+# ======================
 # MAIN
 # ======================
 async def main():
@@ -150,7 +173,7 @@ async def main():
     results_sorted = sorted(results, key=lambda x: x["confidence"], reverse=True)
     best_trade = results_sorted[0]
 
-    # Messaggio Telegram
+    # Messaggio Telegram principale
     msg = f"🚀 TRADE MIGLIORE OGGI\nTrend mercato: {trend}\n\n"
     msg += (
         f"📌 {best_trade['ticker']} — {best_trade['signal']}\n"
@@ -164,6 +187,11 @@ async def main():
         msg += f"{r['ticker']}: {r['signal']} — Conf: {r['confidence']}%\n"
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
+
+    # Esegui alert intraday ogni 15 minuti
+    while True:
+        await intraday_alerts()
+        await asyncio.sleep(900)  # 900s = 15 minuti
 
 if __name__ == "__main__":
     asyncio.run(main())
