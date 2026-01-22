@@ -79,7 +79,7 @@ def market_trend():
     return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLO CON BREAKOUT INTRADAY
+# ANALISI TITOLO CON TRAILING STOP
 # ======================
 def analyze(ticker, trend):
     df_daily = yf.download(ticker, period="6mo", interval="1d", progress=False)
@@ -123,13 +123,11 @@ def analyze(ticker, trend):
     # === BREAKOUT INTRADAY ===
     intraday_high = df_hourly["High"].max()
     intraday_low = df_hourly["Low"].min()
-
     breakout = None
     if last_close > intraday_high:
         breakout = "UP"
     elif last_close < intraday_low:
         breakout = "DOWN"
-
     if not breakout:
         return None
 
@@ -140,13 +138,24 @@ def analyze(ticker, trend):
         return None
 
     signal = "BUY" if breakout == "UP" else "SELL"
+    stop = last_close - last_atr if signal == "BUY" else last_close + last_atr
+    target = last_close + last_atr * RISK_REWARD if signal == "BUY" else last_close - last_atr * RISK_REWARD
+
+    # === TRAILING STOP LOGIC ===
+    trailing_stop = stop
+    current_price = last_close
+    if signal == "BUY":
+        trailing_stop = max(stop, current_price - last_atr * 0.5)
+    else:
+        trailing_stop = min(stop, current_price + last_atr * 0.5)
 
     return {
         "ticker": ticker,
         "signal": signal,
         "entry": round(last_close, 2),
-        "stop": round(last_close - last_atr if signal == "BUY" else last_close + last_atr, 2),
-        "target": round(last_close + last_atr * RISK_REWARD if signal == "BUY" else last_close - last_atr * RISK_REWARD, 2),
+        "stop": round(stop, 2),
+        "trailing_stop": round(trailing_stop, 2),
+        "target": round(target, 2),
         "size": position_size,
         "edge": round(edge * 100, 1),
         "rsi": round(rsi_val, 1)
@@ -168,12 +177,13 @@ async def main():
         await bot.send_message(chat_id=CHAT_ID, text=f"📭 Nessuna opportunità oggi\nTrend mercato: {trend}")
         return
 
-    msg = f"🚀 SEGNALI OPERATIVI INTRADAY\nTrend mercato: {trend}\n\n"
+    msg = f"🚀 SEGNALI OPERATIVI INTRADAY (Trailing Stop Attivo)\nTrend mercato: {trend}\n\n"
     for r in sorted(trades, key=lambda x: x["edge"], reverse=True):
         msg += (
             f"📌 {r['ticker']} — {r['signal']}\n"
             f"Entry: {r['entry']}\n"
             f"Stop: {r['stop']}\n"
+            f"Trailing Stop: {r['trailing_stop']}\n"
             f"Target: {r['target']}\n"
             f"Size: {r['size']}\n"
             f"Edge: {r['edge']}%\n"
