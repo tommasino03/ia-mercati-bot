@@ -27,6 +27,7 @@ RISK_REWARD = 2.0
 
 MIN_CONFIDENCE = 65
 MIN_PROBABILITY = 55
+MIN_SCORE = 90
 
 # ======================
 # UTILS
@@ -36,8 +37,8 @@ def clean_df(df):
         df.columns = df.columns.get_level_values(0)
     return df.dropna()
 
-def last(series):
-    return float(series.iloc[-1])
+def last(s):
+    return float(s.iloc[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -61,30 +62,15 @@ def market_filter():
     high = df["High"].astype(float)
     low = df["Low"].astype(float)
 
-    ma50 = close.rolling(50).mean()
     atr = (high - low).rolling(14).mean()
+    vol = last(atr) / last(close) * 100
 
-    volatility = last(atr) / last(close) * 100
-    momentum = last(close) - close.iloc[-10]
-
-    if volatility < 0.6:
+    if vol < 0.6:
         return False, "Mercato piatto"
-    if volatility > 3.5:
+    if vol > 3.5:
         return False, "Mercato troppo volatile"
-    if momentum < 0 and last(close) < last(ma50):
-        return False, "Trend negativo"
 
-    return True, "Mercato ok"
-
-# ======================
-# TRAILING STOP
-# ======================
-def trailing_stop(entry, atr):
-    return {
-        "break_even": round(entry, 2),
-        "ts_1": round(entry + atr * 0.5, 2),
-        "ts_2": round(entry + atr * 1.0, 2)
-    }
+    return True, "OK"
 
 # ======================
 # PROBABILITÀ STORICA
@@ -92,14 +78,13 @@ def trailing_stop(entry, atr):
 def historical_probability(close, atr):
     wins, total = 0, 0
 
-    for i in range(30, len(close) - 5):
+    for i in range(40, len(close) - 5):
         entry = close.iloc[i]
         atr_val = atr.iloc[i]
         if atr_val <= 0 or np.isnan(atr_val):
             continue
 
         future = close.iloc[i+1:i+6]
-
         if future.max() >= entry + atr_val * RISK_REWARD:
             wins += 1
         total += 1
@@ -124,7 +109,10 @@ def analyze(ticker):
     atr = (high - low).rolling(14).mean()
     rsi_val = last(rsi(close))
 
-    if not (last(close) > last(ma20) > last(ma50) and rsi_val < 45):
+    if not (last(close) > last(ma20) > last(ma50)):
+        return None
+
+    if rsi_val > 50:
         return None
 
     confidence = 70 + (45 - rsi_val)
@@ -140,13 +128,19 @@ def analyze(ticker):
 
     risk_amount = CAPITAL * RISK_PER_TRADE
     size = int(risk_amount / atr_val)
-
-    if size <= 0 or size * entry > CAPITAL * 0.6:
+    if size <= 0:
         return None
 
     stop = entry - atr_val
     target = entry + atr_val * RISK_REWARD
-    ts = trailing_stop(entry, atr_val)
+
+    rr = (target - entry) / (entry - stop)
+    rsi_factor = (50 - rsi_val) / 10
+
+    score = round(probability * rr * rsi_factor, 1)
+
+    if score < MIN_SCORE:
+        return None
 
     return {
         "ticker": ticker,
@@ -155,7 +149,7 @@ def analyze(ticker):
         "target": round(target, 2),
         "size": size,
         "probability": probability,
-        "trail": ts
+        "score": score
     }
 
 # ======================
@@ -167,39 +161,37 @@ async def main():
     if not ok:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"🛑 OGGI NON SI TRADA\nMotivo: {reason}"
+            text=f"🛑 NESSUN TRADE OGGI\nMotivo: {reason}"
         )
         return
 
-    trades = []
+    candidates = []
 
     for t in TICKERS:
         r = analyze(t)
         if r:
-            trades.append(r)
+            candidates.append(r)
 
-    if not trades:
+    if not candidates:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text="📭 Nessun trade con vantaggio oggi"
+            text="📭 Nessun trade con vantaggio statistico oggi"
         )
         return
 
-    msg = "🔥 TRADE CON STOP DINAMICO\n\n"
+    best = sorted(candidates, key=lambda x: x["score"], reverse=True)[0]
 
-    for t in trades:
-        msg += (
-            f"📌 {t['ticker']}\n"
-            f"Entry: {t['entry']}\n"
-            f"Stop iniziale: {t['stop']}\n"
-            f"Target: {t['target']}\n"
-            f"Size: {t['size']} azioni\n"
-            f"Probabilità: {t['probability']}%\n"
-            f"🔁 Trailing stop:\n"
-            f"• Break-even: {t['trail']['break_even']}\n"
-            f"• +0.5 ATR: {t['trail']['ts_1']}\n"
-            f"• +1 ATR: {t['trail']['ts_2']}\n\n"
-        )
+    msg = (
+        "🏆 **TRADE MIGLIORE DEL GIORNO**\n\n"
+        f"📌 {best['ticker']}\n"
+        f"Entry: {best['entry']}\n"
+        f"Stop: {best['stop']}\n"
+        f"Target: {best['target']}\n"
+        f"Size: {best['size']} azioni\n"
+        f"Probabilità: {best['probability']}%\n"
+        f"Score: {best['score']}\n\n"
+        "👉 **UN SOLO TRADE. IL MIGLIORE.**"
+    )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
