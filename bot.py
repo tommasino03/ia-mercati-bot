@@ -64,7 +64,7 @@ def market_trend():
     return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLO
+# ANALISI TITOLO GIORNALIERA
 # ======================
 def analyze(ticker, trend):
     df = yf.download(ticker, period="4mo", interval="1d", progress=False)
@@ -75,7 +75,6 @@ def analyze(ticker, trend):
     close = df["Close"].astype(float)
     high = df["High"].astype(float)
     low = df["Low"].astype(float)
-    volume = df["Volume"].astype(float)
 
     rsi_val = last(rsi(close))
     ma20 = close.rolling(20).mean()
@@ -85,15 +84,12 @@ def analyze(ticker, trend):
     signal = None
     confidence = 0
 
-    # LOGICA TRADE
-    if trend == "UP":
-        if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
-            signal = "BUY"
-            confidence = 70 + (45 - rsi_val)
-    elif trend == "DOWN":
-        if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
-            signal = "SELL"
-            confidence = 70 + (rsi_val - 55)
+    if trend == "UP" and last(close) > last(ma20) > last(ma50) and rsi_val < 45:
+        signal = "BUY"
+        confidence = 70 + (45 - rsi_val)
+    elif trend == "DOWN" and last(close) < last(ma20) < last(ma50) and rsi_val > 55:
+        signal = "SELL"
+        confidence = 70 + (rsi_val - 55)
 
     if not signal or confidence < MIN_CONFIDENCE:
         return None
@@ -116,24 +112,36 @@ def analyze(ticker, trend):
     }
 
 # ======================
-# CHECK INTRADAY (una volta sola)
+# ALERT INTRADAY
 # ======================
-def intraday_check(ticker):
+def intraday_alert(ticker):
     df = yf.download(ticker, period="7d", interval="1h", progress=False)
-    if df.empty:
+    if df.empty or len(df) < 20:
         return None
 
     df = clean_df(df)
     close = df["Close"].astype(float)
+    volume = df["Volume"].astype(float)
+
     ma20 = close.rolling(20).mean()
+    vol_mean = volume.rolling(20).mean()
 
     last_price = last(close)
     last_ma20 = last(ma20)
+    last_vol = last(volume)
+    last_vol_mean = last(vol_mean)
 
+    alerts = []
     if last_price > last_ma20:
-        return f"{ticker}: prezzo sopra MA20 intraday 🔼"
+        alerts.append("prezzo sopra MA20 intraday 🔼")
     elif last_price < last_ma20:
-        return f"{ticker}: prezzo sotto MA20 intraday 🔽"
+        alerts.append("prezzo sotto MA20 intraday 🔽")
+
+    if last_vol > last_vol_mean * 1.5:
+        alerts.append("volume anomalo 🔊")
+
+    if alerts:
+        return f"{ticker}: " + ", ".join(alerts)
     return None
 
 # ======================
@@ -163,9 +171,9 @@ async def main():
     else:
         msg += "📭 Nessun trade valido oggi\n"
 
-    # check intraday (una sola volta)
+    # alert intraday
     for t in TICKERS:
-        alert = intraday_check(t)
+        alert = intraday_alert(t)
         if alert:
             msg += f"⏱ {alert}\n"
 
