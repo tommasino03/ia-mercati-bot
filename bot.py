@@ -21,8 +21,8 @@ TICKERS = [
     "NVDA", "META", "AMD", "PLTR", "ROKU"
 ]
 
-CAPITAL = 10_000          # 💰 capitale simulato
-RISK_PER_TRADE = 0.01     # 1% per trade
+CAPITAL = 10_000
+RISK_PER_TRADE = 0.01
 RISK_REWARD = 2.0
 
 MIN_CONFIDENCE = 65
@@ -49,25 +49,36 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ======================
-# TREND MERCATO
+# FILTRO MERCATO
 # ======================
-def market_trend():
+def market_filter():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
-    if df.empty:
-        return "NEUTRAL"
+    if df.empty or len(df) < 50:
+        return False, "Dati mercato insufficienti"
+
     df = clean_df(df)
     close = df["Close"].astype(float)
-    ma50 = close.rolling(50).mean()
-    ma200 = close.rolling(200).mean()
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
 
-    if last(ma50) > last(ma200):
-        return "UP"
-    elif last(ma50) < last(ma200):
-        return "DOWN"
-    return "NEUTRAL"
+    ma50 = close.rolling(50).mean()
+    atr = (high - low).rolling(14).mean()
+
+    volatility = last(atr) / last(close) * 100
+    momentum = last(close) - close.iloc[-10]
+
+    # ❌ giorni inutili o pericolosi
+    if volatility < 0.6:
+        return False, "Mercato troppo piatto"
+    if volatility > 3.5:
+        return False, "Mercato troppo volatile"
+    if momentum < 0 and last(close) < last(ma50):
+        return False, "Momentum negativo"
+
+    return True, "Mercato tradabile"
 
 # ======================
-# BACKTEST PROBABILITÀ
+# PROBABILITÀ STORICA
 # ======================
 def historical_probability(close, atr, signal):
     wins, total = 0, 0
@@ -83,26 +94,19 @@ def historical_probability(close, atr, signal):
         if signal == "BUY":
             if future.max() >= entry + atr_val * RISK_REWARD:
                 wins += 1
-            elif future.min() <= entry - atr_val:
-                pass
-            else:
-                continue
+            total += 1
+
         else:
             if future.min() <= entry - atr_val * RISK_REWARD:
                 wins += 1
-            elif future.max() >= entry + atr_val:
-                pass
-            else:
-                continue
-
-        total += 1
+            total += 1
 
     return round((wins / total) * 100, 1) if total else 0
 
 # ======================
 # ANALISI TITOLO
 # ======================
-def analyze(ticker, trend):
+def analyze(ticker):
     df = yf.download(ticker, period="6mo", interval="1d", progress=False)
     if df.empty or len(df) < 80:
         return None
@@ -119,13 +123,9 @@ def analyze(ticker, trend):
 
     signal, confidence = None, 0
 
-    if trend == "UP" and last(close) > last(ma20) > last(ma50) and rsi_val < 45:
+    if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
         signal = "BUY"
         confidence = 70 + (45 - rsi_val)
-
-    if trend == "DOWN" and last(close) < last(ma20) < last(ma50) and rsi_val > 55:
-        signal = "SELL"
-        confidence = 70 + (rsi_val - 55)
 
     if not signal or confidence < MIN_CONFIDENCE:
         return None
@@ -136,27 +136,22 @@ def analyze(ticker, trend):
 
     entry = last(close)
     atr_val = last(atr)
-
-    stop_dist = atr_val
     risk_amount = CAPITAL * RISK_PER_TRADE
-    size = int(risk_amount / stop_dist)
+    size = int(risk_amount / atr_val)
 
     if size <= 0 or size * entry > CAPITAL * 0.6:
         return None
 
-    stop = entry - atr_val if signal == "BUY" else entry + atr_val
-    target = entry + atr_val * RISK_REWARD if signal == "BUY" else entry - atr_val * RISK_REWARD
-
+    stop = entry - atr_val
+    target = entry + atr_val * RISK_REWARD
     ev = probability / 100 * RISK_REWARD - (1 - probability / 100)
 
     return {
         "ticker": ticker,
-        "signal": signal,
         "entry": round(entry, 2),
         "stop": round(stop, 2),
         "target": round(target, 2),
         "size": size,
-        "risk": round(risk_amount, 2),
         "probability": probability,
         "ev": round(ev, 2)
     }
@@ -165,33 +160,40 @@ def analyze(ticker, trend):
 # MAIN
 # ======================
 async def main():
-    trend = market_trend()
+    ok, reason = market_filter()
+
+    if not ok:
+        await bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"🛑 OGGI NON SI TRADA\nMotivo: {reason}"
+        )
+        return
+
     results = []
 
     for t in TICKERS:
-        r = analyze(t, trend)
+        r = analyze(t)
         if r:
             results.append(r)
 
     if not results:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessun trade con vantaggio reale oggi\nTrend: {trend}"
+            text="📭 Nessun trade con vantaggio oggi"
         )
         return
 
     results.sort(key=lambda x: x["ev"], reverse=True)
 
-    msg = f"💰 TRADE CON SIZE PROFESSIONALE\nTrend: {trend}\nCapitale: {CAPITAL}€\n\n"
+    msg = "🔥 TRADE AD ALTA QUALITÀ\n\n"
 
     for r in results:
         msg += (
-            f"📌 {r['ticker']} — {r['signal']}\n"
+            f"📌 {r['ticker']}\n"
             f"Entry: {r['entry']}\n"
             f"Stop: {r['stop']}\n"
             f"Target: {r['target']}\n"
             f"Size: {r['size']} azioni\n"
-            f"Rischio: {r['risk']}€\n"
             f"Probabilità: {r['probability']}%\n"
             f"EV: {r['ev']}\n\n"
         )
