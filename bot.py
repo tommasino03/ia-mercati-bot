@@ -21,9 +21,12 @@ TICKERS = [
     "NVDA", "META", "AMD", "PLTR", "ROKU"
 ]
 
+CAPITAL = 10_000          # 💰 capitale simulato
+RISK_PER_TRADE = 0.01     # 1% per trade
 RISK_REWARD = 2.0
+
 MIN_CONFIDENCE = 65
-MIN_PROBABILITY = 55   # 🔥 soglia reale di convenienza
+MIN_PROBABILITY = 55
 
 # ======================
 # UTILS
@@ -67,42 +70,34 @@ def market_trend():
 # BACKTEST PROBABILITÀ
 # ======================
 def historical_probability(close, atr, signal):
-    wins = 0
-    total = 0
+    wins, total = 0, 0
 
     for i in range(30, len(close) - 5):
         entry = close.iloc[i]
         atr_val = atr.iloc[i]
-        if atr_val == 0 or np.isnan(atr_val):
+        if atr_val <= 0 or np.isnan(atr_val):
             continue
 
+        future = close.iloc[i+1:i+6]
+
         if signal == "BUY":
-            stop = entry - atr_val
-            target = entry + atr_val * RISK_REWARD
-            future = close.iloc[i+1:i+6]
-            if future.max() >= target:
+            if future.max() >= entry + atr_val * RISK_REWARD:
                 wins += 1
-            elif future.min() <= stop:
+            elif future.min() <= entry - atr_val:
                 pass
             else:
                 continue
         else:
-            stop = entry + atr_val
-            target = entry - atr_val * RISK_REWARD
-            future = close.iloc[i+1:i+6]
-            if future.min() <= target:
+            if future.min() <= entry - atr_val * RISK_REWARD:
                 wins += 1
-            elif future.max() >= stop:
+            elif future.max() >= entry + atr_val:
                 pass
             else:
                 continue
 
         total += 1
 
-    if total == 0:
-        return 0
-
-    return round((wins / total) * 100, 1)
+    return round((wins / total) * 100, 1) if total else 0
 
 # ======================
 # ANALISI TITOLO
@@ -122,8 +117,7 @@ def analyze(ticker, trend):
     atr = (high - low).rolling(14).mean()
     rsi_val = last(rsi(close))
 
-    signal = None
-    confidence = 0
+    signal, confidence = None, 0
 
     if trend == "UP" and last(close) > last(ma20) > last(ma50) and rsi_val < 45:
         signal = "BUY"
@@ -143,14 +137,17 @@ def analyze(ticker, trend):
     entry = last(close)
     atr_val = last(atr)
 
-    if signal == "BUY":
-        stop = entry - atr_val
-        target = entry + atr_val * RISK_REWARD
-    else:
-        stop = entry + atr_val
-        target = entry - atr_val * RISK_REWARD
+    stop_dist = atr_val
+    risk_amount = CAPITAL * RISK_PER_TRADE
+    size = int(risk_amount / stop_dist)
 
-    expected_value = probability/100 * RISK_REWARD - (1 - probability/100)
+    if size <= 0 or size * entry > CAPITAL * 0.6:
+        return None
+
+    stop = entry - atr_val if signal == "BUY" else entry + atr_val
+    target = entry + atr_val * RISK_REWARD if signal == "BUY" else entry - atr_val * RISK_REWARD
+
+    ev = probability / 100 * RISK_REWARD - (1 - probability / 100)
 
     return {
         "ticker": ticker,
@@ -158,9 +155,10 @@ def analyze(ticker, trend):
         "entry": round(entry, 2),
         "stop": round(stop, 2),
         "target": round(target, 2),
-        "confidence": round(confidence, 1),
+        "size": size,
+        "risk": round(risk_amount, 2),
         "probability": probability,
-        "ev": round(expected_value, 2)
+        "ev": round(ev, 2)
     }
 
 # ======================
@@ -171,20 +169,20 @@ async def main():
     results = []
 
     for t in TICKERS:
-        res = analyze(t, trend)
-        if res:
-            results.append(res)
+        r = analyze(t, trend)
+        if r:
+            results.append(r)
 
     if not results:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessuna operazione con vantaggio reale oggi\nTrend: {trend}"
+            text=f"📭 Nessun trade con vantaggio reale oggi\nTrend: {trend}"
         )
         return
 
-    results = sorted(results, key=lambda x: x["ev"], reverse=True)
+    results.sort(key=lambda x: x["ev"], reverse=True)
 
-    msg = f"💰 TRADE CON VANTAGGIO STATISTICO\nTrend mercato: {trend}\n\n"
+    msg = f"💰 TRADE CON SIZE PROFESSIONALE\nTrend: {trend}\nCapitale: {CAPITAL}€\n\n"
 
     for r in results:
         msg += (
@@ -192,8 +190,10 @@ async def main():
             f"Entry: {r['entry']}\n"
             f"Stop: {r['stop']}\n"
             f"Target: {r['target']}\n"
-            f"Probabilità storica: {r['probability']}%\n"
-            f"Valore atteso (EV): {r['ev']}\n\n"
+            f"Size: {r['size']} azioni\n"
+            f"Rischio: {r['risk']}€\n"
+            f"Probabilità: {r['probability']}%\n"
+            f"EV: {r['ev']}\n\n"
         )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
