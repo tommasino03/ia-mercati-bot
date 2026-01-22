@@ -16,14 +16,14 @@ if not TOKEN or not CHAT_ID:
 
 bot = Bot(token=TOKEN)
 
-TICKERS = [
-    "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA",
-    "NVDA", "META", "AMD", "PLTR", "ROKU"
-]
+# Lista principale + secondaria (meno famosi per opportunità breakout)
+TICKERS_MAIN = ["AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "META", "AMD"]
+TICKERS_EXTRA = ["PLTR", "ROKU", "SNAP", "TWTR", "UBER", "LYFT", "COIN"]
 
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 65  # %
 INTRADAY_VOLUME_MULTIPLIER = 1.5
+GAP_THRESHOLD = 0.02  # 2% gap apertura
 
 # ======================
 # UTILS
@@ -74,7 +74,6 @@ def analyze(ticker, trend):
     close = df["Close"].astype(float)
     high = df["High"].astype(float)
     low = df["Low"].astype(float)
-
     rsi_val = last(rsi(close))
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
@@ -127,20 +126,34 @@ def intraday_alert(ticker):
 
     ma20 = close.rolling(20).mean()
     vol_mean = volume.rolling(20).mean()
-
     last_price = last(close)
     last_ma20 = last(ma20)
     last_vol = last(volume)
     last_vol_mean = last(vol_mean)
 
     alerts = []
+    # movimento intraday
     if last_price > last_ma20:
-        alerts.append("prezzo sopra MA20 intraday 🔼")
+        alerts.append("prezzo sopra MA20 🔼")
     elif last_price < last_ma20:
-        alerts.append("prezzo sotto MA20 intraday 🔽")
+        alerts.append("prezzo sotto MA20 🔽")
 
     if last_vol > last_vol_mean * INTRADAY_VOLUME_MULTIPLIER:
         alerts.append("volume anomalo 🔊")
+
+    # gap apertura
+    prev_close = close.iloc[-2] if len(close) > 1 else last_price
+    gap = (last_price - prev_close) / prev_close
+    if abs(gap) >= GAP_THRESHOLD:
+        alerts.append(f"gap apertura {gap*100:.2f}% ⚡")
+
+    # breakout massimo/minimo settimanale
+    week_high = close[-20:].max()
+    week_low = close[-20:].min()
+    if last_price >= week_high:
+        alerts.append("breakout massimo settimanale 🔝")
+    elif last_price <= week_low:
+        alerts.append("breakout minimo settimanale 🔻")
 
     if alerts:
         return f"{ticker}: " + ", ".join(alerts)
@@ -153,8 +166,8 @@ async def main():
     trend = market_trend()
     results = []
 
-    # segnali giornalieri con ranking
-    for t in TICKERS:
+    # analisi principali + extra
+    for t in TICKERS_MAIN + TICKERS_EXTRA:
         res = analyze(t, trend)
         if res:
             results.append(res)
@@ -162,7 +175,7 @@ async def main():
     # ordina per edge e confidenza
     results_sorted = sorted(results, key=lambda x: (x["edge"], x["confidence"]), reverse=True)
 
-    msg = f"🚀 SEGNALI OPERATIVI HYPER-POWER\nTrend mercato: {trend}\n\n"
+    msg = f"🚀 SEGNALI OPERATIVI 2.0 SUPER-AGGRESSIVE\nTrend mercato: {trend}\n\n"
 
     if results_sorted:
         for r in results_sorted:
@@ -178,7 +191,7 @@ async def main():
         msg += "📭 Nessun trade valido oggi\n"
 
     # alert intraday
-    for t in TICKERS:
+    for t in TICKERS_MAIN + TICKERS_EXTRA:
         alert = intraday_alert(t)
         if alert:
             msg += f"⏱ {alert}\n"
