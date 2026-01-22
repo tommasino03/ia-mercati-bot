@@ -19,7 +19,7 @@ bot = Bot(token=TOKEN)
 CAPITAL = 10_000
 RISK_PER_TRADE = 0.01
 RISK_REWARD = 2.0
-MIN_EDGE = 0.55  # 55% trade vincenti nel mini-backtest
+MIN_EDGE = 0.55
 
 TICKERS = [
     "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA",
@@ -52,21 +52,18 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ======================
-# MINI BACKTEST (EDGE)
+# EDGE BACKTEST
 # ======================
 def edge_filter(close, ma20):
     wins = 0
     trades = 0
-
     for i in range(30, len(close) - 5):
         if close.iloc[i] > ma20.iloc[i]:
             trades += 1
             if close.iloc[i + 5] > close.iloc[i]:
                 wins += 1
-
     if trades == 0:
         return 0
-
     return wins / trades
 
 # ======================
@@ -78,7 +75,6 @@ def analyze(ticker):
         return None
 
     df = clean_df(df)
-
     close = df["Close"]
     high = df["High"]
     low = df["Low"]
@@ -106,6 +102,14 @@ def analyze(ticker):
     if last_close <= scalar(ma20) or last_close <= scalar(ma50):
         return None
 
+    # === CLASSIFICAZIONE TRADE ===
+    if edge > 0.70 and rsi_val < 40:
+        grade = "A+"
+    elif edge > 0.60:
+        grade = "A"
+    else:
+        grade = "B"
+
     position_size = int((CAPITAL * RISK_PER_TRADE) / last_atr)
     if position_size <= 0:
         return None
@@ -117,7 +121,8 @@ def analyze(ticker):
         "target": round(last_close + last_atr * RISK_REWARD, 2),
         "size": position_size,
         "edge": round(edge * 100, 1),
-        "rsi": round(rsi_val, 1)
+        "rsi": round(rsi_val, 1),
+        "grade": grade
     }
 
 # ======================
@@ -138,18 +143,27 @@ async def main():
         )
         return
 
-    best = sorted(trades, key=lambda x: x["edge"], reverse=True)[0]
+    # === STATISTICHE GIORNALIERE ===
+    total_trades = len(trades)
+    avg_edge = round(sum(t['edge'] for t in trades) / total_trades, 1)
+    avg_rsi = round(sum(t['rsi'] for t in trades) / total_trades, 1)
+
+    # === TRADE PRIORITARIO ===
+    best_trade = sorted(trades, key=lambda x: x["edge"], reverse=True)[0]
 
     msg = (
-        "🔥 **TRADE AD ALTA PROBABILITÀ**\n\n"
-        f"{best['ticker']}\n"
-        f"Entry: {best['entry']}\n"
-        f"Stop: {best['stop']}\n"
-        f"Target: {best['target']}\n"
-        f"Size: {best['size']}\n"
-        f"Edge storico: {best['edge']}%\n"
-        f"RSI: {best['rsi']}\n\n"
-        "⚠️ Trade filtrato per edge + volumi anomali"
+        f"🔥 **TRADE AD ALTA PROBABILITÀ**\n\n"
+        f"{best_trade['ticker']} ({best_trade['grade']})\n"
+        f"Entry: {best_trade['entry']}\n"
+        f"Stop: {best_trade['stop']}\n"
+        f"Target: {best_trade['target']}\n"
+        f"Size: {best_trade['size']}\n"
+        f"Edge: {best_trade['edge']}%\n"
+        f"RSI: {best_trade['rsi']}\n\n"
+        f"📊 Totale segnali oggi: {total_trades}\n"
+        f"📊 Edge medio: {avg_edge}%\n"
+        f"📊 RSI medio: {avg_rsi}\n"
+        "\n⚠️ Trade filtrato per edge + volumi anomali"
     )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
