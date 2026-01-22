@@ -31,10 +31,17 @@ TICKERS = [
 LOG_FILE = "trade_log.json"
 
 # ======================
-# UTILS
+# UTILS SICURI
 # ======================
-def last(s):
-    return float(s.iloc[-1])
+def scalar(x):
+    """Restituisce SEMPRE un float sicuro"""
+    if x is None:
+        return None
+    if isinstance(x, pd.Series):
+        if x.empty:
+            return None
+        return float(x.dropna().iloc[-1])
+    return float(x)
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -60,48 +67,57 @@ def save_log(data):
 # ======================
 def drawdown_exceeded():
     log = load_log()
-    if not log:
-        return False
-
-    pnl = sum(t["pnl"] for t in log if "pnl" in t)
+    pnl = sum(t.get("pnl", 0) for t in log)
     return pnl / CAPITAL <= MAX_DRAWDOWN
 
 # ======================
-# ANALISI
+# ANALISI TITOLO
 # ======================
 def analyze(ticker):
     df = yf.download(ticker, period="6mo", interval="1d", progress=False)
     if df.empty or len(df) < 80:
         return None
 
-    close = df["Close"].astype(float)
-    high = df["High"].astype(float)
-    low = df["Low"].astype(float)
+    df = df.dropna()
+
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
 
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
     atr = (high - low).rolling(14).mean()
-    rsi_val = last(rsi(close))
+    rsi_series = rsi(close)
 
-    if not (last(close) > last(ma20) > last(ma50)):
+    last_close = scalar(close)
+    last_ma20 = scalar(ma20)
+    last_ma50 = scalar(ma50)
+    last_atr = scalar(atr)
+    last_rsi = scalar(rsi_series)
+
+    if None in (last_close, last_ma20, last_ma50, last_atr, last_rsi):
         return None
-    if rsi_val > 50:
+
+    # ======================
+    # LOGICA TRADING (EDGE)
+    # ======================
+    if not (last_close > last_ma20 > last_ma50):
         return None
 
-    entry = last(close)
-    atr_val = last(atr)
+    if last_rsi > 50:
+        return None
 
-    size = int((CAPITAL * RISK_PER_TRADE) / atr_val)
+    size = int((CAPITAL * RISK_PER_TRADE) / last_atr)
     if size <= 0:
         return None
 
     return {
         "ticker": ticker,
-        "entry": round(entry, 2),
-        "stop": round(entry - atr_val, 2),
-        "target": round(entry + atr_val * RISK_REWARD, 2),
+        "entry": round(last_close, 2),
+        "stop": round(last_close - last_atr, 2),
+        "target": round(last_close + last_atr * RISK_REWARD, 2),
         "size": size,
-        "confidence": round(70 + (45 - rsi_val), 1)
+        "confidence": round(70 + (45 - last_rsi), 1)
     }
 
 # ======================
@@ -115,30 +131,25 @@ async def main():
         )
         return
 
-    trades = []
+    candidates = []
     for t in TICKERS:
-        r = analyze(t)
-        if r:
-            trades.append(r)
+        res = analyze(t)
+        if res:
+            candidates.append(res)
 
-    if not trades:
+    if not candidates:
         await bot.send_message(
             chat_id=CHAT_ID,
             text="📭 Nessun trade valido oggi"
         )
         return
 
-    best = sorted(trades, key=lambda x: x["confidence"], reverse=True)[0]
+    best = sorted(candidates, key=lambda x: x["confidence"], reverse=True)[0]
 
     log = load_log()
     log.append({
         "date": str(datetime.date.today()),
-        "ticker": best["ticker"],
-        "entry": best["entry"],
-        "stop": best["stop"],
-        "target": best["target"],
-        "size": best["size"],
-        "confidence": best["confidence"]
+        **best
     })
     save_log(log)
 
@@ -150,7 +161,7 @@ async def main():
         f"Target: {best['target']}\n"
         f"Size: {best['size']}\n"
         f"Confidenza: {best['confidence']}%\n\n"
-        "⚠️ Rispetta stop e size"
+        "⚠️ Rispetta SEMPRE stop e size"
     )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
