@@ -3,8 +3,8 @@ import asyncio
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
 from telegram import Bot
+from datetime import datetime, timedelta
 
 # ======================
 # CONFIG
@@ -24,11 +24,11 @@ TICKERS = [
 
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 65
-MIN_EDGE = 2.0
-LOG_FILE = "trades_log.csv"
+LOOKAHEAD_DAYS = 5
+TRADES_FILE = "trades.csv"
 
 # ======================
-# UTILS SICURI
+# UTILS
 # ======================
 def clean_df(df):
     if isinstance(df.columns, pd.MultiIndex):
@@ -36,7 +36,7 @@ def clean_df(df):
     return df.dropna()
 
 def last(series):
-    return float(series.values[-1])
+    return float(series.iloc[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -48,7 +48,7 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ======================
-# TREND MERCATO
+# MARKET TREND
 # ======================
 def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
@@ -56,7 +56,7 @@ def market_trend():
         return "NEUTRAL"
 
     df = clean_df(df)
-    close = df["Close"].astype(float)
+    close = df["Close"]
 
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
@@ -68,7 +68,7 @@ def market_trend():
     return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLO
+# SIGNAL GENERATION
 # ======================
 def analyze(ticker, trend):
     df = yf.download(ticker, period="4mo", interval="1d", progress=False)
@@ -76,17 +76,14 @@ def analyze(ticker, trend):
         return None
 
     df = clean_df(df)
-
-    close = df["Close"].astype(float)
-    high = df["High"].astype(float)
-    low = df["Low"].astype(float)
-    volume = df["Volume"].astype(float)
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
 
     rsi_val = last(rsi(close))
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
     atr = (high - low).rolling(14).mean()
-    atr_val = last(atr)
 
     signal = None
     confidence = 0
@@ -105,71 +102,120 @@ def analyze(ticker, trend):
         return None
 
     entry = last(close)
+    atr_val = last(atr)
 
     if signal == "BUY":
         stop = entry - atr_val
         target = entry + atr_val * RISK_REWARD
-        edge = (target - entry) / (entry - stop)
     else:
         stop = entry + atr_val
         target = entry - atr_val * RISK_REWARD
-        edge = (entry - target) / (stop - entry)
-
-    if edge < MIN_EDGE:
-        return None
 
     return {
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
         "ticker": ticker,
         "signal": signal,
-        "entry": round(entry, 2),
-        "stop": round(stop, 2),
-        "target": round(target, 2),
+        "entry": entry,
+        "stop": stop,
+        "target": target,
         "confidence": round(min(confidence, 95), 1),
-        "edge": round(edge, 2)
+        "status": "OPEN"
     }
 
 # ======================
-# LOG TRADE
+# TRADE TRACKING
 # ======================
-def log_trade(trade):
-    df = pd.DataFrame([trade])
-    if not os.path.exists(LOG_FILE):
-        df.to_csv(LOG_FILE, index=False)
-    else:
-        df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+def update_trades():
+    if not os.path.exists(TRADES_FILE):
+        return None
+
+    trades = pd.read_csv(TRADES_FILE)
+    updated = False
+
+    for i, t in trades.iterrows():
+        if t["status"] != "OPEN":
+            continue
+
+        df = yf.download(
+            t["ticker"],
+            start=t["date"],
+            end=(datetime.strptime(t["date"], "%Y-%m-%d") + timedelta(days=LOOKAHEAD_DAYS)).strftime("%Y-%m-%d"),
+            interval="1d",
+            progress=False
+        )
+
+        if df.empty:
+            continue
+
+        df = clean_df(df)
+        high = df["High"].max()
+        low = df["Low"].min()
+
+        if t["signal"] == "BUY":
+            if high >= t["target"]:
+                trades.at[i, "status"] = "WIN"
+                updated = True
+            elif low <= t["stop"]:
+                trades.at[i, "status"] = "LOSS"
+                updated = True
+        else:
+            if low <= t["target"]:
+                trades.at[i, "status"] = "WIN"
+                updated = True
+            elif high >= t["stop"]:
+                trades.at[i, "status"] = "LOSS"
+                updated = True
+
+    if updated:
+        trades.to_csv(TRADES_FILE, index=False)
+
+    return trades
 
 # ======================
 # MAIN
 # ======================
 async def main():
     trend = market_trend()
-    results = []
+    new_trades = []
 
     for t in TICKERS:
-        r = analyze(t, trend)
-        if r:
-            results.append(r)
-            log_trade(r)
+        res = analyze(t, trend)
+        if res:
+            new_trades.append(res)
 
-    if not results:
+    if new_trades:
+        df_new = pd.DataFrame(new_trades)
+        if os.path.exists(TRADES_FILE):
+            df_old = pd.read_csv(TRADES_FILE)
+            df_all = pd.concat([df_old, df_new], ignore_index=True)
+        else:
+            df_all = df_new
+
+        df_all.to_csv(TRADES_FILE, index=False)
+
+    trades = update_trades()
+
+    if trades is None or trades.empty:
+        await bot.send_message(chat_id=CHAT_ID, text="📭 Nessun trade storico disponibile")
+        return
+
+    closed = trades[trades["status"].isin(["WIN", "LOSS"])]
+
+    if closed.empty:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessun trade valido oggi\nTrend mercato: {trend}"
+            text=f"📊 Trend: {trend}\n⏳ Trade aperti, nessun risultato ancora"
         )
         return
 
-    msg = f"🚀 SEGNALI OPERATIVI\nTrend mercato: {trend}\n\n"
+    win_rate = round(len(closed[closed["status"] == "WIN"]) / len(closed) * 100, 1)
 
-    for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
-        msg += (
-            f"📌 {r['ticker']} — {r['signal']}\n"
-            f"Entry: {r['entry']}\n"
-            f"Stop: {r['stop']}\n"
-            f"Target: {r['target']}\n"
-            f"Confidenza: {r['confidence']}%\n"
-            f"Edge: {r['edge']}\n\n"
-        )
+    msg = (
+        f"📊 REPORT PERFORMANCE\n"
+        f"Trend mercato: {trend}\n\n"
+        f"Trade chiusi: {len(closed)}\n"
+        f"Win rate: {win_rate}%\n"
+    )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
