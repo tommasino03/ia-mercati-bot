@@ -26,6 +26,7 @@ RISK_REWARD = 2.0
 MIN_CONFIDENCE = 65
 LOOKAHEAD_DAYS = 5
 TRADES_FILE = "trades.csv"
+EXCLUDED_FILE = "excluded.csv"
 
 # ======================
 # UTILS
@@ -57,7 +58,6 @@ def market_trend():
 
     df = clean_df(df)
     close = df["Close"]
-
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
 
@@ -70,7 +70,10 @@ def market_trend():
 # ======================
 # SIGNAL GENERATION
 # ======================
-def analyze(ticker, trend):
+def analyze(ticker, trend, excluded):
+    if ticker in excluded:
+        return None  # skip ticker escluso
+
     df = yf.download(ticker, period="4mo", interval="1d", progress=False)
     if df.empty or len(df) < 60:
         return None
@@ -88,22 +91,18 @@ def analyze(ticker, trend):
     signal = None
     confidence = 0
 
-    if trend == "UP":
-        if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
-            signal = "BUY"
-            confidence = 70 + (45 - rsi_val)
-
-    elif trend == "DOWN":
-        if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
-            signal = "SELL"
-            confidence = 70 + (rsi_val - 55)
+    if trend == "UP" and last(close) > last(ma20) > last(ma50) and rsi_val < 45:
+        signal = "BUY"
+        confidence = 70 + (45 - rsi_val)
+    elif trend == "DOWN" and last(close) < last(ma20) < last(ma50) and rsi_val > 55:
+        signal = "SELL"
+        confidence = 70 + (rsi_val - 55)
 
     if not signal or confidence < MIN_CONFIDENCE:
         return None
 
     entry = last(close)
     atr_val = last(atr)
-
     if signal == "BUY":
         stop = entry - atr_val
         target = entry + atr_val * RISK_REWARD
@@ -123,11 +122,15 @@ def analyze(ticker, trend):
     }
 
 # ======================
-# TRADE TRACKING
+# TRADE TRACKING & EXCLUSION
 # ======================
 def update_trades():
+    excluded = []
+    if os.path.exists(EXCLUDED_FILE):
+        excluded = pd.read_csv(EXCLUDED_FILE)["ticker"].tolist()
+
     if not os.path.exists(TRADES_FILE):
-        return None
+        return excluded, pd.DataFrame()
 
     trades = pd.read_csv(TRADES_FILE)
     updated = False
@@ -158,6 +161,7 @@ def update_trades():
             elif low <= t["stop"]:
                 trades.at[i, "status"] = "LOSS"
                 updated = True
+                excluded.append(t["ticker"])
         else:
             if low <= t["target"]:
                 trades.at[i, "status"] = "WIN"
@@ -165,21 +169,25 @@ def update_trades():
             elif high >= t["stop"]:
                 trades.at[i, "status"] = "LOSS"
                 updated = True
+                excluded.append(t["ticker"])
 
     if updated:
         trades.to_csv(TRADES_FILE, index=False)
+        if excluded:
+            pd.DataFrame({"ticker": list(set(excluded))}).to_csv(EXCLUDED_FILE, index=False)
 
-    return trades
+    return excluded, trades
 
 # ======================
 # MAIN
 # ======================
 async def main():
     trend = market_trend()
+    excluded, trades = update_trades()
     new_trades = []
 
     for t in TICKERS:
-        res = analyze(t, trend)
+        res = analyze(t, trend, excluded)
         if res:
             new_trades.append(res)
 
@@ -190,21 +198,14 @@ async def main():
             df_all = pd.concat([df_old, df_new], ignore_index=True)
         else:
             df_all = df_new
-
         df_all.to_csv(TRADES_FILE, index=False)
 
-    trades = update_trades()
-
-    if trades is None or trades.empty:
-        await bot.send_message(chat_id=CHAT_ID, text="📭 Nessun trade storico disponibile")
-        return
-
-    closed = trades[trades["status"].isin(["WIN", "LOSS"])]
+    closed = trades[trades["status"].isin(["WIN", "LOSS"])] if not trades.empty else pd.DataFrame()
 
     if closed.empty:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📊 Trend: {trend}\n⏳ Trade aperti, nessun risultato ancora"
+            text=f"📊 Trend: {trend}\n⏳ Nessun trade chiuso ancora"
         )
         return
 
@@ -215,6 +216,7 @@ async def main():
         f"Trend mercato: {trend}\n\n"
         f"Trade chiusi: {len(closed)}\n"
         f"Win rate: {win_rate}%\n"
+        f"Tickers esclusi (LOSS): {', '.join(excluded) if excluded else 'nessuno'}"
     )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
