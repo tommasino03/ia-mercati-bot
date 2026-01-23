@@ -3,6 +3,7 @@ import asyncio
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from datetime import datetime
 from telegram import Bot
 
 # ======================
@@ -12,17 +13,19 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise ValueError("Token Telegram mancanti")
+    raise ValueError("❌ Token Telegram mancanti")
 
 bot = Bot(token=TOKEN)
 
 TICKERS = [
-    "AAPL","MSFT","NVDA","AMZN","META",
-    "TSLA","AMD","GOOGL","PLTR","COIN"
+    "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA",
+    "NVDA", "META", "AMD", "PLTR", "ROKU"
 ]
 
-RISK_REWARD = 2.5
-MIN_CONFIDENCE = 70
+RISK_REWARD = 2.0
+MIN_CONFIDENCE = 65
+MIN_EDGE = 2.0
+LOG_FILE = "trades_log.csv"
 
 # ======================
 # UTILS SICURI
@@ -33,7 +36,7 @@ def clean_df(df):
     return df.dropna()
 
 def last(series):
-    return float(series.iloc[-1])
+    return float(series.values[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -45,15 +48,16 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ======================
-# TREND MERCATO (SP500)
+# TREND MERCATO
 # ======================
 def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
-    if df.empty or len(df) < 200:
+    if df.empty:
         return "NEUTRAL"
 
     df = clean_df(df)
     close = df["Close"].astype(float)
+
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
 
@@ -67,7 +71,7 @@ def market_trend():
 # ANALISI TITOLO
 # ======================
 def analyze(ticker, trend):
-    df = yf.download(ticker, period="6mo", interval="1d", progress=False)
+    df = yf.download(ticker, period="4mo", interval="1d", progress=False)
     if df.empty or len(df) < 60:
         return None
 
@@ -78,69 +82,62 @@ def analyze(ticker, trend):
     low = df["Low"].astype(float)
     volume = df["Volume"].astype(float)
 
+    rsi_val = last(rsi(close))
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
-    vol_mean = volume.rolling(20).mean()
-
-    rsi_val = last(rsi(close))
     atr = (high - low).rolling(14).mean()
     atr_val = last(atr)
 
-    last_close = last(close)
-    last_ma20 = last(ma20)
-    last_ma50 = last(ma50)
-    last_vol = last(volume)
-    avg_vol = last(vol_mean)
-
-    # ======================
-    # FILTRI DI QUALITÀ
-    # ======================
-    confidence = 0
     signal = None
+    confidence = 0
 
     if trend == "UP":
-        if last_close > last_ma50 and last_ma20 > last_ma50 and 40 < rsi_val < 60:
+        if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
             signal = "BUY"
-            confidence += 40
+            confidence = 70 + (45 - rsi_val)
+
     elif trend == "DOWN":
-        if last_close < last_ma50 and last_ma20 < last_ma50 and 40 < rsi_val < 60:
+        if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
             signal = "SELL"
-            confidence += 40
-    else:
+            confidence = 70 + (rsi_val - 55)
+
+    if not signal or confidence < MIN_CONFIDENCE:
         return None
 
-    # Volume = soldi veri
-    if last_vol > avg_vol * 1.2:
-        confidence += 20
-    else:
-        return None
+    entry = last(close)
 
-    # Momentum
-    if abs(last_close - last_ma20) > atr_val * 0.3:
-        confidence += 15
-
-    if confidence < MIN_CONFIDENCE:
-        return None
-
-    # ======================
-    # STOP & TARGET INTELLIGENTI
-    # ======================
     if signal == "BUY":
-        stop = last_close - atr_val * 1.1
-        target = last_close + atr_val * RISK_REWARD
+        stop = entry - atr_val
+        target = entry + atr_val * RISK_REWARD
+        edge = (target - entry) / (entry - stop)
     else:
-        stop = last_close + atr_val * 1.1
-        target = last_close - atr_val * RISK_REWARD
+        stop = entry + atr_val
+        target = entry - atr_val * RISK_REWARD
+        edge = (entry - target) / (stop - entry)
+
+    if edge < MIN_EDGE:
+        return None
 
     return {
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "ticker": ticker,
         "signal": signal,
-        "entry": round(last_close, 2),
+        "entry": round(entry, 2),
         "stop": round(stop, 2),
         "target": round(target, 2),
-        "confidence": confidence,
-        "rsi": round(rsi_val, 1)
+        "confidence": round(min(confidence, 95), 1),
+        "edge": round(edge, 2)
     }
+
+# ======================
+# LOG TRADE
+# ======================
+def log_trade(trade):
+    df = pd.DataFrame([trade])
+    if not os.path.exists(LOG_FILE):
+        df.to_csv(LOG_FILE, index=False)
+    else:
+        df.to_csv(LOG_FILE, mode="a", header=False, index=False)
 
 # ======================
 # MAIN
@@ -153,6 +150,7 @@ async def main():
         r = analyze(t, trend)
         if r:
             results.append(r)
+            log_trade(r)
 
     if not results:
         await bot.send_message(
@@ -161,7 +159,7 @@ async def main():
         )
         return
 
-    msg = f"💰 SEGNALI AD ALTA PROBABILITÀ\nTrend mercato: {trend}\n\n"
+    msg = f"🚀 SEGNALI OPERATIVI\nTrend mercato: {trend}\n\n"
 
     for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
         msg += (
@@ -170,7 +168,7 @@ async def main():
             f"Stop: {r['stop']}\n"
             f"Target: {r['target']}\n"
             f"Confidenza: {r['confidence']}%\n"
-            f"RSI: {r['rsi']}\n\n"
+            f"Edge: {r['edge']}\n\n"
         )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
