@@ -48,6 +48,9 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
+def atr(high, low, period=14):
+    return (high - low).rolling(period).mean()
+
 # ======================
 # MARKET TREND
 # ======================
@@ -68,29 +71,48 @@ def market_trend():
     return "NEUTRAL"
 
 # ======================
-# SIGNAL GENERATION
+# SIGNAL GENERATION MULTI-TIMEFRAME
 # ======================
 def analyze(ticker, trend, excluded):
     if ticker in excluded:
-        return None  # skip ticker escluso
-
-    df = yf.download(ticker, period="4mo", interval="1d", progress=False)
-    if df.empty or len(df) < 60:
         return None
 
-    df = clean_df(df)
-    close = df["Close"]
-    high = df["High"]
-    low = df["Low"]
+    # timeframe daily
+    df_daily = yf.download(ticker, period="4mo", interval="1d", progress=False)
+    # timeframe weekly
+    df_weekly = yf.download(ticker, period="12mo", interval="1wk", progress=False)
 
+    if df_daily.empty or len(df_daily) < 60 or df_weekly.empty:
+        return None
+
+    df_daily = clean_df(df_daily)
+    df_weekly = clean_df(df_weekly)
+
+    close = df_daily["Close"]
+    high = df_daily["High"]
+    low = df_daily["Low"]
+
+    # Daily indicators
     rsi_val = last(rsi(close))
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
-    atr = (high - low).rolling(14).mean()
+    atr_val = last(atr(high, low))
+
+    # Weekly trend confirmation
+    weekly_close = df_weekly["Close"]
+    weekly_ma20 = weekly_close.rolling(20).mean()
+    weekly_ma50 = weekly_close.rolling(50).mean()
+
+    weekly_trend_ok = (last(weekly_ma20) > last(weekly_ma50) and trend=="UP") or \
+                      (last(weekly_ma20) < last(weekly_ma50) and trend=="DOWN")
+
+    if not weekly_trend_ok:
+        return None
 
     signal = None
     confidence = 0
 
+    # LOGICA TRADE
     if trend == "UP" and last(close) > last(ma20) > last(ma50) and rsi_val < 45:
         signal = "BUY"
         confidence = 70 + (45 - rsi_val)
@@ -101,8 +123,10 @@ def analyze(ticker, trend, excluded):
     if not signal or confidence < MIN_CONFIDENCE:
         return None
 
+    # Score combinato con ATR (volatilità)
+    score = confidence * (1 - min(atr_val/last(close),0.2))  # penalizza titoli troppo volatili
+
     entry = last(close)
-    atr_val = last(atr)
     if signal == "BUY":
         stop = entry - atr_val
         target = entry + atr_val * RISK_REWARD
@@ -114,15 +138,16 @@ def analyze(ticker, trend, excluded):
         "date": datetime.utcnow().strftime("%Y-%m-%d"),
         "ticker": ticker,
         "signal": signal,
-        "entry": entry,
-        "stop": stop,
-        "target": target,
-        "confidence": round(min(confidence, 95), 1),
+        "entry": round(entry,2),
+        "stop": round(stop,2),
+        "target": round(target,2),
+        "confidence": round(confidence,1),
+        "score": round(score,1),
         "status": "OPEN"
     }
 
 # ======================
-# TRADE TRACKING & EXCLUSION
+# TRADE TRACKING
 # ======================
 def update_trades():
     excluded = []
@@ -146,7 +171,6 @@ def update_trades():
             interval="1d",
             progress=False
         )
-
         if df.empty:
             continue
 
@@ -200,24 +224,19 @@ async def main():
             df_all = df_new
         df_all.to_csv(TRADES_FILE, index=False)
 
-    closed = trades[trades["status"].isin(["WIN", "LOSS"])] if not trades.empty else pd.DataFrame()
+    closed = trades[trades["status"].isin(["WIN","LOSS"])] if not trades.empty else pd.DataFrame()
+    win_rate = round(len(closed[closed["status"]=="WIN"])/len(closed)*100,1) if not closed.empty else 0
 
-    if closed.empty:
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"📊 Trend: {trend}\n⏳ Nessun trade chiuso ancora"
-        )
-        return
-
-    win_rate = round(len(closed[closed["status"] == "WIN"]) / len(closed) * 100, 1)
-
-    msg = (
-        f"📊 REPORT PERFORMANCE\n"
-        f"Trend mercato: {trend}\n\n"
-        f"Trade chiusi: {len(closed)}\n"
-        f"Win rate: {win_rate}%\n"
-        f"Tickers esclusi (LOSS): {', '.join(excluded) if excluded else 'nessuno'}"
-    )
+    msg = f"📊 REPORT PERFORMANCE\nTrend mercato: {trend}\n\n"
+    msg += f"Trade chiusi: {len(closed)}\nWin rate: {win_rate}%\n"
+    msg += f"Tickers esclusi (LOSS): {', '.join(excluded) if excluded else 'nessuno'}\n\n"
+    msg += "🚀 Segnali attivi:\n"
+    if new_trades:
+        for r in sorted(new_trades, key=lambda x: x["score"], reverse=True):
+            msg += (f"📌 {r['ticker']} — {r['signal']} | Conf: {r['confidence']} | Score: {r['score']}\n"
+                    f"Entry: {r['entry']} | Stop: {r['stop']} | Target: {r['target']}\n\n")
+    else:
+        msg += "Nessun segnale valido oggi"
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
