@@ -23,7 +23,9 @@ TICKERS = [
 
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 60
-INITIAL_CAPITAL = 1000  # capitale virtuale iniziale
+INITIAL_CAPITAL = 1000
+TRADE_PERCENT = 0.1  # 10% del capitale per trade
+UPDATE_INTERVAL = 60 * 60  # intervallo in secondi (1h)
 
 # ======================
 # UTILS
@@ -136,7 +138,7 @@ def execute_trade(trade):
     stop = trade["stop"]
     target = trade["target"]
 
-    position_size = capital * 0.1  # investiamo 10% del capitale per trade
+    position_size = capital * TRADE_PERCENT
     shares = position_size / entry
 
     positions[ticker] = {
@@ -169,46 +171,47 @@ async def update_positions():
         del positions[t]
 
 # ======================
-# MAIN
+# LOOP PRINCIPALE
 # ======================
-async def main():
-    trend = market_trend()
-    results = []
+async def run_bot():
+    global capital
+    while True:
+        trend = market_trend()
+        results = []
 
-    for t in TICKERS:
-        res = analyze(t, trend)
-        if res:
-            results.append(res)
-            execute_trade(res)
+        for t in TICKERS:
+            res = analyze(t, trend)
+            if res:
+                results.append(res)
+                execute_trade(res)
 
-    await update_positions()
+        await update_positions()
 
-    if not results and not positions:
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"📭 Nessun trade valido ora\nCapitale: {round(capital,2)}$\nTrend mercato: {trend}"
-        )
-        return
+        msg = f"🚀 PAPER TRADING\nTrend mercato: {trend}\nCapitale: {round(capital,2)}$\n\n"
 
-    msg = f"🚀 PAPER TRADING\nTrend mercato: {trend}\nCapitale: {round(capital,2)}$\n\n"
+        if results:
+            for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
+                msg += (
+                    f"📌 {r['ticker']} — {r['signal']}\n"
+                    f"Entry: {r['entry']}\n"
+                    f"Stop: {r['stop']}\n"
+                    f"Target: {r['target']}\n"
+                    f"Confidenza: {r['confidence']}%\n\n"
+                )
+        else:
+            msg += "📭 Nessun trade valido ora\n\n"
 
-    for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
-        msg += (
-            f"📌 {r['ticker']} — {r['signal']}\n"
-            f"Entry: {r['entry']}\n"
-            f"Stop: {r['stop']}\n"
-            f"Target: {r['target']}\n"
-            f"Confidenza: {r['confidence']}%\n\n"
-        )
+        if positions:
+            msg += "💼 POSIZIONI APERTE:\n"
+            for t, p in positions.items():
+                msg += (
+                    f"{t} — {p['signal']} — Entry: {p['entry']} — Stop: {p['stop']} — Target: {p['target']}\n"
+                )
 
-    if positions:
-        msg += "💼 POSIZIONI APERTE:\n"
-        for t, p in positions.items():
-            msg += (
-                f"{t} — {p['signal']} — Entry: {p['entry']} — Stop: {p['stop']} — Target: {p['target']}\n"
-            )
+        await bot.send_message(chat_id=CHAT_ID, text=msg)
 
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
+        # aspetta l'intervallo prima di rieseguire
+        await asyncio.sleep(UPDATE_INTERVAL)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_bot())
