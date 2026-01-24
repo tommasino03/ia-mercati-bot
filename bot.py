@@ -23,6 +23,7 @@ TICKERS = [
 
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 65  # %
+CAPITALE = 1000  # capitale iniziale per paper trading
 
 # ======================
 # UTILS
@@ -33,13 +34,10 @@ def clean_df(df):
     return df.dropna()
 
 def last(x):
-    """Restituisce l'ultimo valore di una Series come float"""
-    if isinstance(x, pd.Series):
-        return float(x.iloc[-1])
-    elif isinstance(x, (int, float)):
-        return float(x)
-    else:
-        raise ValueError("Tipo non supportato in last()")
+    arr = np.array(x)
+    if len(arr.shape) > 1:  # se è DataFrame
+        return float(arr[-1, 0])
+    return float(arr[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -54,64 +52,70 @@ def rsi(series, period=14):
 # TREND MERCATO
 # ======================
 def market_trend():
-    print("🔄 Download dati S&P500 per trend mercato...")
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
     if df.empty:
-        print("⚠️ Dati S&P500 vuoti!")
         return "NEUTRAL"
 
     df = clean_df(df)
     close = df["Close"].astype(float)
+
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
 
-    trend = "NEUTRAL"
     if last(ma50) > last(ma200):
-        trend = "UP"
+        return "UP"
     elif last(ma50) < last(ma200):
-        trend = "DOWN"
-
-    print(f"📊 Trend mercato: {trend}")
-    return trend
+        return "DOWN"
+    return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLO
+# ANALISI TITOLO + MOVERS + PAPER TRADING
 # ======================
-def analyze(ticker, trend):
-    print(f"🔄 Analizzando {ticker}...")
+def analyze(ticker, trend, capitale):
     df = yf.download(ticker, period="4mo", interval="1d", progress=False)
     if df.empty or len(df) < 60:
-        print(f"⚠️ {ticker} ha dati insufficienti.")
-        return None
+        return None, capitale
 
     df = clean_df(df)
     close = df["Close"].astype(float)
     high = df["High"].astype(float)
     low = df["Low"].astype(float)
     volume = df["Volume"].astype(float)
+    open_price = df["Open"].astype(float)
 
     rsi_val = last(rsi(close))
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
     atr_val = last((high - low).rolling(14).mean())
 
+    # ======================
+    # MOVERS GIORNALIERI
+    # ======================
+    daily_change_pct = (last(close) - last(open_price)) / last(open_price) * 100
+    is_mover = abs(daily_change_pct) >= 3  # soglia %
+
     signal = None
     confidence = 0
 
+    # ======================
     # LOGICA TRADE
+    # ======================
     if trend == "UP":
         if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
             signal = "BUY"
             confidence = 70 + (45 - rsi_val)
-
     elif trend == "DOWN":
         if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
             signal = "SELL"
             confidence = 70 + (rsi_val - 55)
 
+    # Se non ci sono segnali classici ma il titolo è mover
+    if not signal and is_mover:
+        signal = "BUY" if daily_change_pct > 0 else "SELL"
+        confidence = min(85, 50 + abs(daily_change_pct) * 5)
+
     if not signal or confidence < MIN_CONFIDENCE:
-        print(f"ℹ️ {ticker}: nessun trade valido. Confidenza: {confidence:.1f}%")
-        return None
+        return None, capitale
 
     entry = last(close)
     if signal == "BUY":
@@ -121,48 +125,61 @@ def analyze(ticker, trend):
         stop = entry + atr_val
         target = entry - atr_val * RISK_REWARD
 
-    print(f"✅ {ticker} segnale trovato: {signal}, Confidenza: {confidence:.1f}%")
-    return {
+    # ======================
+    # PAPER TRADING
+    # ======================
+    # calcolo numero azioni da comprare in base al capitale disponibile
+    qty = max(1, int(capitale / entry))
+    # aggiorno capitale ipotetico
+    capitale -= qty * entry
+
+    trade_info = {
         "ticker": ticker,
         "signal": signal,
         "entry": round(entry, 2),
         "stop": round(stop, 2),
         "target": round(target, 2),
-        "confidence": round(min(confidence, 95), 1)
+        "confidence": round(min(confidence, 95), 1),
+        "qty": qty,
+        "mover": is_mover
     }
+
+    return trade_info, capitale
 
 # ======================
 # MAIN
 # ======================
 async def main():
-    print("🚀 Avvio bot trading...")
     trend = market_trend()
+    capitale = CAPITALE
     results = []
 
     for t in TICKERS:
-        res = analyze(t, trend)
-        if res:
-            results.append(res)
+        r, capitale = analyze(t, trend, capitale)
+        if r:
+            results.append(r)
 
     if not results:
-        msg = f"📭 Nessun trade valido oggi\nTrend mercato: {trend}"
-        print(msg)
-        await bot.send_message(chat_id=CHAT_ID, text=msg)
+        await bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"📭 Nessun trade valido oggi\nTrend mercato: {trend}\nCapitale residuo: {capitale:.2f}$"
+        )
         return
 
-    msg = f"🚀 SEGNALI OPERATIVI\nTrend mercato: {trend}\n\n"
+    msg = f"🚀 SEGNALI OPERATIVI (Paper trading)\nTrend mercato: {trend}\nCapitale iniziale: {CAPITALE}$\nCapitale residuo: {capitale:.2f}$\n\n"
+
     for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
         msg += (
             f"📌 {r['ticker']} — {r['signal']}\n"
-            f"Entry: {r['entry']}\n"
-            f"Stop: {r['stop']}\n"
-            f"Target: {r['target']}\n"
-            f"Confidenza: {r['confidence']}%\n\n"
+            f"Entry: {r['entry']}$\n"
+            f"Stop: {r['stop']}$\n"
+            f"Target: {r['target']}$\n"
+            f"Quantità: {r['qty']}\n"
+            f"Confidenza: {r['confidence']}%\n"
+            f"Mover: {'✅' if r['mover'] else '❌'}\n\n"
         )
 
-    print("📨 Invio messaggi Telegram...")
     await bot.send_message(chat_id=CHAT_ID, text=msg)
-    print("✅ Messaggio inviato!")
 
 if __name__ == "__main__":
     asyncio.run(main())
