@@ -22,7 +22,8 @@ TICKERS = [
 ]
 
 RISK_REWARD = 2.0
-MIN_CONFIDENCE = 60  # soglia minima di confidenza
+MIN_CONFIDENCE = 60
+INITIAL_CAPITAL = 1000  # capitale virtuale iniziale
 
 # ======================
 # UTILS
@@ -92,9 +93,6 @@ def analyze(ticker, trend):
     signal = None
     confidence = 0
 
-    # ======================
-    # LOGICA TRADE
-    # ======================
     if trend == "UP":
         if last(close) > last(ma20) > last(ma50) and rsi_val < 50 and volume_spike:
             signal = "BUY"
@@ -125,6 +123,52 @@ def analyze(ticker, trend):
     }
 
 # ======================
+# PAPER TRADING
+# ======================
+capital = INITIAL_CAPITAL
+positions = {}
+
+def execute_trade(trade):
+    global capital, positions
+    ticker = trade["ticker"]
+    signal = trade["signal"]
+    entry = trade["entry"]
+    stop = trade["stop"]
+    target = trade["target"]
+
+    position_size = capital * 0.1  # investiamo 10% del capitale per trade
+    shares = position_size / entry
+
+    positions[ticker] = {
+        "signal": signal,
+        "entry": entry,
+        "stop": stop,
+        "target": target,
+        "shares": shares
+    }
+
+async def update_positions():
+    global capital, positions
+    to_remove = []
+    for ticker, pos in positions.items():
+        df = yf.download(ticker, period="5d", interval="60m", progress=False)
+        if df.empty:
+            continue
+        last_price = last(df['Close'].astype(float))
+        if pos['signal'] == "BUY":
+            if last_price <= pos['stop'] or last_price >= pos['target']:
+                pnl = (last_price - pos['entry']) * pos['shares']
+                capital += pnl
+                to_remove.append(ticker)
+        else:
+            if last_price >= pos['stop'] or last_price <= pos['target']:
+                pnl = (pos['entry'] - last_price) * pos['shares']
+                capital += pnl
+                to_remove.append(ticker)
+    for t in to_remove:
+        del positions[t]
+
+# ======================
 # MAIN
 # ======================
 async def main():
@@ -135,15 +179,19 @@ async def main():
         res = analyze(t, trend)
         if res:
             results.append(res)
+            execute_trade(res)
 
-    if not results:
+    await update_positions()
+
+    if not results and not positions:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessun trade valido ora\nTrend mercato: {trend}"
+            text=f"📭 Nessun trade valido ora\nCapitale: {round(capital,2)}$\nTrend mercato: {trend}"
         )
         return
 
-    msg = f"🚀 SEGNALI OPERATIVI INTRADAY\nTrend mercato: {trend}\n\n"
+    msg = f"🚀 PAPER TRADING\nTrend mercato: {trend}\nCapitale: {round(capital,2)}$\n\n"
+
     for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
         msg += (
             f"📌 {r['ticker']} — {r['signal']}\n"
@@ -152,6 +200,13 @@ async def main():
             f"Target: {r['target']}\n"
             f"Confidenza: {r['confidence']}%\n\n"
         )
+
+    if positions:
+        msg += "💼 POSIZIONI APERTE:\n"
+        for t, p in positions.items():
+            msg += (
+                f"{t} — {p['signal']} — Entry: {p['entry']} — Stop: {p['stop']} — Target: {p['target']}\n"
+            )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
