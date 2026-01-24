@@ -22,7 +22,7 @@ TICKERS = [
 ]
 
 RISK_REWARD = 2.0
-MIN_CONFIDENCE = 65  # %
+MIN_CONFIDENCE = 60  # soglia minima di confidenza
 
 # ======================
 # UTILS
@@ -33,13 +33,7 @@ def clean_df(df):
     return df.dropna()
 
 def last(x):
-    # Restituisce un singolo valore float sicuro
-    if isinstance(x, pd.Series):
-        return float(x.iloc[-1])
-    elif isinstance(x, (list, np.ndarray)):
-        return float(x[-1])
-    else:
-        return float(x)
+    return float(np.array(x)[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -50,6 +44,13 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
+def atr(df, period=14):
+    high_low = df['High'] - df['Low']
+    high_close = (df['High'] - df['Close'].shift()).abs()
+    low_close = (df['Low'] - df['Close'].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    return tr.rolling(period).mean()
+
 # ======================
 # TREND MERCATO
 # ======================
@@ -57,13 +58,10 @@ def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
     if df.empty:
         return "NEUTRAL"
-
     df = clean_df(df)
-    close = df["Close"].astype(float)
-
+    close = df['Close'].astype(float)
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
-
     if last(ma50) > last(ma200):
         return "UP"
     elif last(ma50) < last(ma200):
@@ -74,22 +72,22 @@ def market_trend():
 # ANALISI TITOLO
 # ======================
 def analyze(ticker, trend):
-    df = yf.download(ticker, period="4mo", interval="1d", progress=False)
-    if df.empty or len(df) < 60:
+    df = yf.download(ticker, period="2mo", interval="60m", progress=False)
+    if df.empty or len(df) < 30:
         return None
-
     df = clean_df(df)
-    close = df["Close"].astype(float)
-    high = df["High"].astype(float)
-    low = df["Low"].astype(float)
-    volume = df["Volume"].astype(float)
+    close = df['Close'].astype(float)
+    high = df['High'].astype(float)
+    low = df['Low'].astype(float)
+    volume = df['Volume'].astype(float)
 
     rsi_val = last(rsi(close))
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
-
-    atr = (high - low).rolling(14).mean()
-    atr_val = last(atr)
+    atr_val = last(atr(df))
+    vol_mean = volume.rolling(20).mean()
+    vol_last = last(volume)
+    volume_spike = vol_last > last(vol_mean) * 1.5
 
     signal = None
     confidence = 0
@@ -98,20 +96,18 @@ def analyze(ticker, trend):
     # LOGICA TRADE
     # ======================
     if trend == "UP":
-        if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
+        if last(close) > last(ma20) > last(ma50) and rsi_val < 50 and volume_spike:
             signal = "BUY"
-            confidence = 70 + (45 - rsi_val)
-
+            confidence = 65 + (50 - rsi_val)
     elif trend == "DOWN":
-        if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
+        if last(close) < last(ma20) < last(ma50) and rsi_val > 50 and volume_spike:
             signal = "SELL"
-            confidence = 70 + (rsi_val - 55)
+            confidence = 65 + (rsi_val - 50)
 
     if not signal or confidence < MIN_CONFIDENCE:
         return None
 
     entry = last(close)
-
     if signal == "BUY":
         stop = entry - atr_val
         target = entry + atr_val * RISK_REWARD
@@ -129,12 +125,6 @@ def analyze(ticker, trend):
     }
 
 # ======================
-# PAPER TRADING
-# ======================
-CAPITALE_INIZIALE = 1000
-portfolio = {}
-
-# ======================
 # MAIN
 # ======================
 async def main():
@@ -149,24 +139,18 @@ async def main():
     if not results:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessun trade valido oggi\nTrend mercato: {trend}\nCapitale: {CAPITALE_INIZIALE}$"
+            text=f"📭 Nessun trade valido ora\nTrend mercato: {trend}"
         )
         return
 
-    msg = f"🚀 SEGNALI OPERATIVI - PAPER TRADING\nTrend mercato: {trend}\nCapitale: {CAPITALE_INIZIALE}$\n\n"
-
+    msg = f"🚀 SEGNALI OPERATIVI INTRADAY\nTrend mercato: {trend}\n\n"
     for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
-        # Aggiornamento simulazione capitale
-        qty = CAPITALE_INIZIALE * 0.1 / r["entry"]  # 10% del capitale per trade
-        portfolio[r["ticker"]] = {"qty": qty, "entry": r["entry"], "signal": r["signal"]}
-
         msg += (
             f"📌 {r['ticker']} — {r['signal']}\n"
             f"Entry: {r['entry']}\n"
             f"Stop: {r['stop']}\n"
             f"Target: {r['target']}\n"
-            f"Confidenza: {r['confidence']}%\n"
-            f"Qty simulata: {round(qty,2)} azioni\n\n"
+            f"Confidenza: {r['confidence']}%\n\n"
         )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
