@@ -3,7 +3,6 @@ import asyncio
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
 from telegram import Bot
 
 # ======================
@@ -17,31 +16,19 @@ if not TOKEN or not CHAT_ID:
 
 bot = Bot(token=TOKEN)
 
-TICKERS = [
-    "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA",
-    "NVDA", "META", "AMD", "PLTR", "ROKU"
-]
-
+CAPITALE_INIZIALE = 1000  # capitale per paper trading
 RISK_REWARD = 2.0
-MIN_CONFIDENCE = 65  # %
-
-CAPITALE_INIZIALE = 1000.0
-capital = CAPITALE_INIZIALE
-
-LOG_FILE = "trades_log.csv"
+MIN_CONFIDENCE = 60  # %
+TOP_N = 10  # quanti top movers considerare
 
 # ======================
 # UTILS
 # ======================
-def clean_df(df):
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    return df.dropna()
+def last(series):
+    return float(series.iloc[-1])
 
-def last(x):
-    if isinstance(x, pd.Series):
-        return float(x.iloc[-1])
-    return float(x)
+def pct_change(series, period=1):
+    return (series / series.shift(period) - 1) * 100
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -51,6 +38,34 @@ def rsi(series, period=14):
     avg_loss = loss.rolling(period).mean()
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
+
+def clean_df(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df.dropna()
+
+# ======================
+# TOP MOVERS
+# ======================
+def get_top_movers():
+    # Lista ampia di titoli da monitorare
+    tickers = [
+        "AAPL","MSFT","AMZN","GOOGL","TSLA",
+        "NVDA","META","AMD","PLTR","ROKU",
+        "ALIBABA","CRM","INTC","UBER","LYFT",
+        "SNAP","SPOT","PINS","SHOP","BABA"
+    ]
+    movers = []
+    for t in tickers:
+        df = yf.download(t, period="5d", interval="1d", progress=False)
+        if df.empty:
+            continue
+        df = clean_df(df)
+        df["daily_change"] = pct_change(df["Close"])
+        movers.append((t, last(df["daily_change"])))
+    movers = sorted(movers, key=lambda x: abs(x[1]), reverse=True)
+    top = [t for t, change in movers[:TOP_N]]
+    return top
 
 # ======================
 # TREND MERCATO
@@ -65,7 +80,7 @@ def market_trend():
     ma200 = close.rolling(200).mean()
     if last(ma50) > last(ma200):
         return "UP"
-    elif last(ma50) < last(ma200):
+    elif last(ma50) < last(ma200]:
         return "DOWN"
     return "NEUTRAL"
 
@@ -73,14 +88,14 @@ def market_trend():
 # ANALISI TITOLO
 # ======================
 def analyze(ticker, trend):
-    df = yf.download(ticker, period="4mo", interval="1d", progress=False)
-    if df.empty or len(df) < 60:
+    df = yf.download(ticker, period="1mo", interval="1h", progress=False)
+    if df.empty or len(df) < 20:
         return None
-
     df = clean_df(df)
     close = df["Close"].astype(float)
     high = df["High"].astype(float)
     low = df["Low"].astype(float)
+    volume = df["Volume"].astype(float)
 
     rsi_val = last(rsi(close))
     ma20 = close.rolling(20).mean()
@@ -90,14 +105,17 @@ def analyze(ticker, trend):
     signal = None
     confidence = 0
 
-    if trend == "UP":
-        if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
+    # ======================
+    # LOGICA TRADE SEMPLIFICATA E PIÙ REATTIVA
+    # ======================
+    if trend == "UP" and last(close) > last(ma20):
+        if rsi_val < 50:
             signal = "BUY"
-            confidence = 70 + (45 - rsi_val)
-    elif trend == "DOWN":
-        if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
+            confidence = 60 + (50 - rsi_val)
+    elif trend == "DOWN" and last(close) < last(ma20):
+        if rsi_val > 50:
             signal = "SELL"
-            confidence = 70 + (rsi_val - 55)
+            confidence = 60 + (rsi_val - 50)
 
     if not signal or confidence < MIN_CONFIDENCE:
         return None
@@ -120,68 +138,33 @@ def analyze(ticker, trend):
     }
 
 # ======================
-# SIMULAZIONE PAPER TRADING
-# ======================
-def paper_trade(trade):
-    global capital
-    # calcolo pnl semplice (chiude sempre a target per test)
-    if trade["signal"] == "BUY":
-        pnl = trade["target"] - trade["entry"]
-    else:
-        pnl = trade["entry"] - trade["target"]
-
-    qty = capital / trade["entry"]  # tutto il capitale in un titolo
-    profit = pnl * qty
-    capital += profit
-
-    # log su CSV
-    row = {
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "ticker": trade["ticker"],
-        "signal": trade["signal"],
-        "entry": trade["entry"],
-        "target": trade["target"],
-        "stop": trade["stop"],
-        "profit": round(profit, 2),
-        "capital": round(capital, 2)
-    }
-
-    df_log = pd.DataFrame([row])
-    if os.path.exists(LOG_FILE):
-        df_log.to_csv(LOG_FILE, mode="a", header=False, index=False)
-    else:
-        df_log.to_csv(LOG_FILE, mode="w", header=True, index=False)
-
-    return row
-
-# ======================
-# MAIN
+# MAIN PAPER TRADING
 # ======================
 async def main():
     trend = market_trend()
+    top_tickers = get_top_movers()
     results = []
 
-    for t in TICKERS:
-        trade = analyze(t, trend)
-        if trade:
-            row = paper_trade(trade)
-            results.append(row)
+    for t in top_tickers:
+        res = analyze(t, trend)
+        if res:
+            results.append(res)
 
     if not results:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessun trade valido oggi\nCapitale: {round(capital,2)}€\nTrend mercato: {trend}"
+            text=f"📭 Nessun trade valido oggi\nTrend mercato: {trend}\nCapitale: {CAPITALE_INIZIALE}$"
         )
         return
 
-    msg = f"🚀 PAPER TRADING - SEGNALI OPERATIVI\nTrend mercato: {trend}\nCapitale attuale: {round(capital,2)}€\n\n"
-    for r in sorted(results, key=lambda x: x["profit"], reverse=True):
+    msg = f"🚀 SEGNALI PAPER TRADING\nTrend mercato: {trend}\nCapitale: {CAPITALE_INIZIALE}$\n\n"
+    for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
         msg += (
             f"📌 {r['ticker']} — {r['signal']}\n"
             f"Entry: {r['entry']}\n"
-            f"Target: {r['target']}\n"
             f"Stop: {r['stop']}\n"
-            f"Profit simulato: {r['profit']}\n\n"
+            f"Target: {r['target']}\n"
+            f"Confidenza: {r['confidence']}%\n\n"
         )
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
