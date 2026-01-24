@@ -4,6 +4,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from telegram import Bot
+from datetime import datetime
 
 # ======================
 # CONFIG
@@ -16,32 +17,28 @@ if not TOKEN or not CHAT_ID:
 
 bot = Bot(token=TOKEN)
 
-CAPITALE = 10000
+STATE_FILE = "paper_state.csv"
+
+CAPITALE_INIZIALE = 10000
 RISK_PER_TRADE = 0.02
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 70
 
-# Tickers base + scanner anomali
-BASE_TICKERS = [
-    "AAPL", "MSFT", "NVDA", "TSLA", "META",
-    "AMD", "AMZN", "GOOGL"
-]
-
-SCAN_TICKERS = [
-    "PLTR", "SOFI", "DKNG", "AFRM", "COIN",
-    "RIVN", "LCID", "SHOP", "SNAP", "ROKU"
+TICKERS = [
+    "AAPL", "MSFT", "NVDA", "TSLA",
+    "AMD", "META", "AMZN", "PLTR", "SOFI"
 ]
 
 # ======================
 # UTILS SICURI
 # ======================
+def last(series):
+    return float(series.iloc[-1])
+
 def clean_df(df):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df.dropna()
-
-def last(series):
-    return float(series.iloc[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -52,11 +49,35 @@ def rsi(series, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-def position_size(entry, stop):
-    rischio = abs(entry - stop)
-    if rischio == 0:
-        return 0
-    return int((CAPITALE * RISK_PER_TRADE) / rischio)
+# ======================
+# STATO PAPER TRADING
+# ======================
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {
+            "capital": CAPITALE_INIZIALE,
+            "positions": []
+        }
+    df = pd.read_csv(STATE_FILE)
+    positions = df.to_dict("records")
+    capital = positions[0]["capital"]
+    return {"capital": capital, "positions": positions}
+
+def save_state(state):
+    if not state["positions"]:
+        df = pd.DataFrame([{
+            "capital": state["capital"],
+            "ticker": "",
+            "side": "",
+            "entry": 0,
+            "stop": 0,
+            "target": 0,
+            "qty": 0,
+            "open_date": ""
+        }])
+    else:
+        df = pd.DataFrame(state["positions"])
+    df.to_csv(STATE_FILE, index=False)
 
 # ======================
 # TREND MERCATO
@@ -65,52 +86,16 @@ def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
     if df.empty:
         return "NEUTRAL"
-
     df = clean_df(df)
     close = df["Close"]
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
-
-    if last(ma50) > last(ma200):
-        return "UP"
-    elif last(ma50) < last(ma200):
-        return "DOWN"
-    return "NEUTRAL"
+    return "UP" if last(ma50) > last(ma200) else "DOWN"
 
 # ======================
-# SCANNER MOVIMENTI ANOMALI
+# ANALISI TRADE
 # ======================
-def anomalous_move(ticker):
-    df = yf.download(ticker, period="2mo", interval="1d", progress=False)
-    if df.empty or len(df) < 25:
-        return None
-
-    df = clean_df(df)
-    close = df["Close"]
-    volume = df["Volume"]
-
-    price = last(close)
-    if price < 3:
-        return None
-
-    vol_ratio = last(volume) / volume.rolling(20).mean().iloc[-1]
-    daily_move = (close.iloc[-1] - close.iloc[-2]) / close.iloc[-2] * 100
-
-    if vol_ratio >= 2.5 and abs(daily_move) >= 4:
-        direction = "BUY" if daily_move > 0 else "SELL"
-        return {
-            "ticker": ticker,
-            "direction": direction,
-            "vol_ratio": round(vol_ratio, 2),
-            "move": round(daily_move, 2)
-        }
-
-    return None
-
-# ======================
-# ANALISI OPERATIVA
-# ======================
-def analyze_trade(ticker, trend):
+def analyze(ticker, trend):
     df = yf.download(ticker, period="4mo", interval="1d", progress=False)
     if df.empty or len(df) < 60:
         return None
@@ -131,80 +116,112 @@ def analyze_trade(ticker, trend):
     if trend == "UP" and last(close) > last(ma20) > last(ma50) and rsi_val < 50:
         signal = "BUY"
         confidence = 75 + (50 - rsi_val)
-    elif trend == "DOWN" and last(close) < last(ma20) < last(ma50) and rsi_val > 50:
-        signal = "SELL"
-        confidence = 75 + (rsi_val - 50)
 
     if not signal or confidence < MIN_CONFIDENCE:
         return None
 
     entry = last(close)
-    atr_val = last(atr)
-
-    if signal == "BUY":
-        stop = entry - atr_val
-        target = entry + atr_val * RISK_REWARD
-    else:
-        stop = entry + atr_val
-        target = entry - atr_val * RISK_REWARD
-
-    lots = position_size(entry, stop)
+    stop = entry - last(atr)
+    target = entry + last(atr) * RISK_REWARD
 
     return {
         "ticker": ticker,
-        "signal": signal,
-        "entry": round(entry, 2),
-        "stop": round(stop, 2),
-        "target": round(target, 2),
-        "lots": lots,
-        "confidence": round(min(confidence, 95), 1)
+        "side": signal,
+        "entry": entry,
+        "stop": stop,
+        "target": target,
+        "confidence": round(confidence, 1)
     }
+
+# ======================
+# PAPER TRADING ENGINE
+# ======================
+def position_size(capital, entry, stop):
+    risk = abs(entry - stop)
+    if risk == 0:
+        return 0
+    return int((capital * RISK_PER_TRADE) / risk)
 
 # ======================
 # MAIN
 # ======================
 async def main():
+    state = load_state()
+    capital = state["capital"]
+    positions = state["positions"]
+    messages = []
+
+    # 🔴 CONTROLLO POSIZIONI APERTE
+    new_positions = []
+    for p in positions:
+        if not p["ticker"]:
+            continue
+
+        df = yf.download(p["ticker"], period="5d", interval="1d", progress=False)
+        if df.empty:
+            new_positions.append(p)
+            continue
+
+        price = last(df["Close"])
+        pnl = 0
+
+        if price <= p["stop"]:
+            pnl = (p["stop"] - p["entry"]) * p["qty"]
+            capital += pnl
+            messages.append(
+                f"🔴 CHIUSA {p['ticker']} STOP\nRisultato: {round(pnl,2)} €\nCapitale: {round(capital,2)} €"
+            )
+        elif price >= p["target"]:
+            pnl = (p["target"] - p["entry"]) * p["qty"]
+            capital += pnl
+            messages.append(
+                f"🟢 CHIUSA {p['ticker']} TARGET\nRisultato: {round(pnl,2)} €\nCapitale: {round(capital,2)} €"
+            )
+        else:
+            new_positions.append(p)
+
+    positions = new_positions
+
+    # 🟢 NUOVE APERTURE
     trend = market_trend()
-    signals = []
+    for t in TICKERS:
+        if any(p["ticker"] == t for p in positions):
+            continue
 
-    # Analisi titoli principali
-    for t in BASE_TICKERS:
-        r = analyze_trade(t, trend)
-        if r:
-            signals.append(r)
+        trade = analyze(t, trend)
+        if trade:
+            qty = position_size(capital, trade["entry"], trade["stop"])
+            if qty <= 0:
+                continue
 
-    # Scanner anomalie
-    for t in SCAN_TICKERS:
-        anomaly = anomalous_move(t)
-        if anomaly:
-            r = analyze_trade(t, trend)
-            if r:
-                r["note"] = f"⚡ Volume {anomaly['vol_ratio']}x | Move {anomaly['move']}%"
-                signals.append(r)
+            positions.append({
+                "capital": capital,
+                "ticker": trade["ticker"],
+                "side": trade["side"],
+                "entry": trade["entry"],
+                "stop": trade["stop"],
+                "target": trade["target"],
+                "qty": qty,
+                "open_date": datetime.now().strftime("%Y-%m-%d")
+            })
 
-    if not signals:
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"📭 Nessuna opportunità forte oggi\nTrend: {trend}"
-        )
-        return
+            messages.append(
+                f"🟢 APERTA {trade['ticker']} BUY\n"
+                f"Entry: {round(trade['entry'],2)}\n"
+                f"Stop: {round(trade['stop'],2)}\n"
+                f"Target: {round(trade['target'],2)}\n"
+                f"Qty: {qty}\n"
+                f"Capitale: {round(capital,2)} €"
+            )
 
-    msg = f"🔥 SEGNALI AD ALTO EDGE\nTrend mercato: {trend}\n\n"
+    state["capital"] = capital
+    state["positions"] = positions
+    save_state(state)
 
-    for s in sorted(signals, key=lambda x: x["confidence"], reverse=True):
-        msg += (
-            f"📌 {s['ticker']} — {s['signal']}\n"
-            f"Entry: {s['entry']}\n"
-            f"Stop: {s['stop']}\n"
-            f"Target: {s['target']}\n"
-            f"Lotti: {s['lots']}\n"
-            f"Confidenza: {s['confidence']}%\n"
-        )
-        if "note" in s:
-            msg += f"{s['note']}\n"
-        msg += "\n"
-
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
+    if messages:
+        await bot.send_message(chat_id=CHAT_ID, text="\n\n".join(messages))
+    else:
+        await bot.send_message(chat_id=CHAT_ID, text=f"📭 Nessuna azione oggi\nCapitale: {round(capital,2)} €")
 
 if __name__ == "__main__":
     asyncio.run(main())
