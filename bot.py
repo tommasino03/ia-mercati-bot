@@ -20,7 +20,6 @@ bot = Bot(token=TOKEN)
 CAPITALE_INIZIALE = 1000
 RISK_PER_TRADE = 0.02
 RISK_REWARD = 2.0
-MIN_CONFIDENCE = 60
 TRADES_FILE = "trades.csv"
 
 TICKERS = [
@@ -30,17 +29,17 @@ TICKERS = [
 ]
 
 # ======================
-# UTILS SICURE
+# UTILS ULTRA-SICURE
 # ======================
-def scalar(x):
-    if isinstance(x, pd.DataFrame):
-        x = x.iloc[:, 0]
-    if isinstance(x, pd.Series):
-        x = x.dropna()
-        if len(x) == 0:
-            return None
-        return float(x.iloc[-1])
+def safe_last(x):
     try:
+        if isinstance(x, pd.DataFrame):
+            x = x.iloc[:, 0]
+        if isinstance(x, pd.Series):
+            x = x.dropna()
+            if len(x) == 0:
+                return None
+            return float(x.iloc[-1])
         return float(x)
     except:
         return None
@@ -68,16 +67,20 @@ def save_trade(trade):
     df.to_csv(TRADES_FILE, index=False)
 
 # ======================
-# MERCATO
+# MARKET TREND (ROBUSTO)
 # ======================
 def market_trend():
-    df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
-    if df.empty:
+    df = yf.download("^GSPC", period="1y", interval="1d", progress=False)
+    if df.empty or len(df) < 60:
         return "NEUTRAL"
 
     close = df["Close"]
-    ma50 = scalar(close.rolling(50).mean())
-    ma200 = scalar(close.rolling(200).mean())
+
+    ma50 = safe_last(close.rolling(50).mean())
+    ma200 = safe_last(close.rolling(200).mean())
+
+    if ma50 is None or ma200 is None:
+        return "NEUTRAL"
 
     if ma50 > ma200:
         return "UP"
@@ -86,11 +89,11 @@ def market_trend():
     return "NEUTRAL"
 
 # ======================
-# ANALISI
+# ANALISI TITOLI (MOVER)
 # ======================
 def analyze(ticker, trend, capitale):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
-    if df.empty or len(df) < 50:
+    if df.empty or len(df) < 30:
         return None
 
     close = df["Close"]
@@ -98,21 +101,23 @@ def analyze(ticker, trend, capitale):
     low = df["Low"]
     volume = df["Volume"]
 
-    price = scalar(close)
-    prev = scalar(close.iloc[:-1])
+    price = safe_last(close)
+    prev = safe_last(close.iloc[:-1])
 
     if price is None or prev is None:
         return None
 
-    daily_move = ((price - prev) / prev) * 100
-    if daily_move < 4:
+    daily_change = ((price - prev) / prev) * 100
+
+    # 🔥 Filtro mover reali (come eToro)
+    if daily_change < 5:
         return None
 
-    rsi_val = scalar(rsi(close))
-    ma20 = scalar(close.rolling(20).mean())
-    ma50 = scalar(close.rolling(50).mean())
-    vol_now = scalar(volume)
-    vol_avg = scalar(volume.rolling(20).mean())
+    rsi_val = safe_last(rsi(close))
+    ma20 = safe_last(close.rolling(20).mean())
+    ma50 = safe_last(close.rolling(50).mean())
+    vol_now = safe_last(volume)
+    vol_avg = safe_last(volume.rolling(20).mean())
 
     if None in [rsi_val, ma20, ma50, vol_now, vol_avg]:
         return None
@@ -120,11 +125,14 @@ def analyze(ticker, trend, capitale):
     if vol_now < vol_avg * 1.5:
         return None
 
-    if trend != "UP" or not (price > ma20 > ma50):
+    if trend != "UP":
         return None
 
-    atr = scalar((high - low).rolling(14).mean())
-    if atr is None:
+    if not (price > ma20 > ma50):
+        return None
+
+    atr = safe_last((high - low).rolling(14).mean())
+    if atr is None or atr <= 0:
         return None
 
     risk = capitale * RISK_PER_TRADE
@@ -138,29 +146,33 @@ def analyze(ticker, trend, capitale):
         "target": round(price + atr * RISK_REWARD, 2),
         "size": size,
         "date": datetime.utcnow().strftime("%Y-%m-%d"),
-        "status": "OPEN"
+        "status": "OPEN",
+        "reason": f"Breakout + volume | +{round(daily_change,1)}% | RSI {round(rsi_val,1)}"
     }
 
 # ======================
-# CHECK TRADE APERTI
+# CHECK TRADES
 # ======================
 async def check_open_trades():
     df = load_trades()
-    if df.empty:
-        return CAPITALE_INIZIALE
-
     capitale = CAPITALE_INIZIALE
+
+    if df.empty:
+        return capitale
 
     for i, row in df.iterrows():
         if row["status"] != "OPEN":
-            capitale += row["pnl"]
+            capitale += row.get("pnl", 0)
             continue
 
-        df_price = yf.download(row["ticker"], period="5d", interval="1d", progress=False)
-        if df_price.empty:
+        data = yf.download(row["ticker"], period="5d", interval="1d", progress=False)
+        if data.empty:
             continue
 
-        price = scalar(df_price["Close"])
+        price = safe_last(data["Close"])
+        if price is None:
+            continue
+
         pnl = 0
 
         if price >= row["target"]:
@@ -176,7 +188,7 @@ async def check_open_trades():
             df.loc[i, "pnl"] = round(pnl, 2)
             await bot.send_message(
                 chat_id=CHAT_ID,
-                text=f"🔔 TRADE CHIUSO {row['ticker']}\nRisultato: {df.loc[i,'status']}\nPNL: {round(pnl,2)}€"
+                text=f"🔔 CHIUSURA {row['ticker']}\nRisultato: {df.loc[i,'status']}\nPNL: {round(pnl,2)}€"
             )
 
     df.to_csv(TRADES_FILE, index=False)
@@ -189,26 +201,27 @@ async def main():
     capitale = await check_open_trades()
     trend = market_trend()
 
-    trades_today = []
+    nuovi = []
 
     for t in TICKERS:
         trade = analyze(t, trend, capitale)
         if trade:
             save_trade(trade)
-            trades_today.append(trade)
+            nuovi.append(trade)
 
-    if not trades_today:
+    if not nuovi:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessuna nuova operazione\nTrend: {trend}\nCapitale: {round(capitale,2)}€"
+            text=f"📭 Nessun trade oggi\nTrend: {trend}\nCapitale: {round(capitale,2)}€"
         )
         return
 
-    msg = f"📈 NUOVI TRADE (Paper)\nTrend: {trend}\nCapitale: {round(capitale,2)}€\n\n"
+    msg = f"🚀 NUOVI TRADE (Paper)\nTrend: {trend}\nCapitale: {round(capitale,2)}€\n\n"
 
-    for t in trades_today:
+    for t in nuovi:
         msg += (
             f"📌 {t['ticker']}\n"
+            f"Motivo: {t['reason']}\n"
             f"Entry: {t['entry']}\n"
             f"Stop: {t['stop']}\n"
             f"Target: {t['target']}\n"
