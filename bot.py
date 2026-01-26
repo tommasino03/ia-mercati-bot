@@ -20,7 +20,7 @@ bot = Bot(token=TOKEN)
 CAPITALE_INIZIALE = 1000
 RISK_PER_TRADE = 0.02
 RISK_REWARD = 2.0
-TRADES_FILE = "trades_intraday.csv"
+TRADES_FILE = "trades_real_time.csv"
 
 TICKERS = [
     "AAPL","MSFT","NVDA","AMD","META","AMZN","TSLA",
@@ -28,8 +28,9 @@ TICKERS = [
     "SNAP","PYPL","ROKU","MARA","RIOT"
 ]
 
-INTERVAL = "15m"
-LOOKBACK = "10d"
+INTERVAL_INTRADAY = "15m"
+LOOKBACK_INTRADAY = "10d"
+PREMARKET_HOURS = ("13:30", "15:30")  # UTC corrisponde 8:30-10:30 EST
 
 # ======================
 # UTILS ROBUSTI
@@ -76,26 +77,34 @@ def market_trend():
     df = yf.download("^GSPC", period="1y", interval="1d", progress=False)
     if df.empty or len(df) < 60:
         return "NEUTRAL"
-
     close = df["Close"]
     ma50 = safe_last(close.rolling(50).mean())
     ma200 = safe_last(close.rolling(200).mean())
     if ma50 is None or ma200 is None:
         return "NEUTRAL"
-    if ma50 > ma200:
-        return "UP"
-    elif ma50 < ma200:
-        return "DOWN"
-    return "NEUTRAL"
+    return "UP" if ma50 > ma200 else "DOWN"
+
+# ======================
+# SCANSIONE PRE-MARKET
+# ======================
+def premarket_movers():
+    movers = []
+    for t in TICKERS:
+        df = yf.download(t, period="2d", interval="1d", progress=False)
+        if df.empty or len(df) < 2:
+            continue
+        change = ((df["Close"].iloc[-1] - df["Close"].iloc[-2]) / df["Close"].iloc[-2]) * 100
+        movers.append((t, change))
+    movers.sort(key=lambda x: abs(x[1]), reverse=True)
+    return movers[:5]  # top 5 movers
 
 # ======================
 # ANALISI TITOLO INTRADAY
 # ======================
 def analyze_ticker(ticker, trend, capitale):
-    df = yf.download(ticker, period=LOOKBACK, interval=INTERVAL, progress=False)
+    df = yf.download(ticker, period=LOOKBACK_INTRADAY, interval=INTERVAL_INTRADAY, progress=False)
     if df.empty or len(df) < 20:
         return None
-
     df = df.dropna()
     close = df["Close"]
     high = df["High"]
@@ -108,16 +117,12 @@ def analyze_ticker(ticker, trend, capitale):
         return None
 
     daily_change = ((price - prev) / prev) * 100
-
-    # Filtra solo movers reali
     vol_avg = safe_last(volume.rolling(20).mean())
     vol_now = safe_last(volume)
     if vol_avg is None or vol_now is None:
         return None
     if vol_now < vol_avg * 1.5 or daily_change < 1.5:
         return None
-
-    # Solo trend positivo
     if trend != "UP":
         return None
 
@@ -142,24 +147,23 @@ def analyze_ticker(ticker, trend, capitale):
         "size": size,
         "date": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
         "status": "OPEN",
+        "trail": stop,
         "reason": f"Intraday Breakout + volume | +{round(daily_change,1)}% | RSI {round(rsi_val,1)}"
     }
 
 # ======================
-# TRACCIAMENTO AUTOMATICO + TRAILING STOP
+# TRACCIAMENTO + TRAILING STOP
 # ======================
 async def check_trades():
     df = load_trades()
     capitale = CAPITALE_INIZIALE
     if df.empty:
         return capitale
-
     for i, row in df.iterrows():
         if row["status"] != "OPEN":
             capitale += row.get("pnl",0)
             continue
-
-        data = yf.download(row["ticker"], period="2d", interval=INTERVAL, progress=False)
+        data = yf.download(row["ticker"], period="2d", interval=INTERVAL_INTRADAY, progress=False)
         if data.empty:
             continue
         price = safe_last(data["Close"])
@@ -169,14 +173,10 @@ async def check_trades():
         pnl = 0
         updated = False
 
-        # Trailing stop
-        if "trail" not in row or pd.isna(row["trail"]):
-            row["trail"] = row["stop"]
         if price - row["trail"] > 0:
             row["trail"] = price - (row["entry"] - row["stop"])
             updated = True
 
-        # Controlla target e stop
         if price >= row["target"]:
             pnl = (row["target"] - row["entry"])*row["size"]
             df.loc[i,"status"] = "WIN"
@@ -194,7 +194,6 @@ async def check_trades():
                 chat_id=CHAT_ID,
                 text=f"🔔 CHIUSURA {row['ticker']}\nRisultato: {df.loc[i,'status']}\nPNL: {round(pnl,2)}€"
             )
-
     df.to_csv(TRADES_FILE,index=False)
     return capitale
 
@@ -223,16 +222,26 @@ async def weekly_report():
 async def main():
     capitale = await check_trades()
     trend = market_trend()
+
     nuovi = []
 
-    for t in TICKERS:
+    # Scansione top movers pre-market
+    movers = premarket_movers()
+    for t, change in movers:
         trade = analyze_ticker(t, trend, capitale)
         if trade:
             save_trade(trade)
             nuovi.append(trade)
 
+    # Controllo intraday normale
+    for t in TICKERS:
+        trade = analyze_ticker(t, trend, capitale)
+        if trade and trade not in nuovi:
+            save_trade(trade)
+            nuovi.append(trade)
+
     if nuovi:
-        msg = f"🚀 NUOVI TRADE INTRADAY (Paper)\nTrend: {trend}\nCapitale: {round(capitale,2)}€\n\n"
+        msg = f"🚀 NUOVI TRADE (Paper)\nTrend: {trend}\nCapitale: {round(capitale,2)}€\n\n"
         for t in nuovi:
             msg += (
                 f"📌 {t['ticker']}\n"
@@ -245,7 +254,7 @@ async def main():
         await bot.send_message(chat_id=CHAT_ID, text=msg)
     else:
         await bot.send_message(chat_id=CHAT_ID,
-                               text=f"📭 Nessun trade intraday ora\nTrend: {trend}\nCapitale: {round(capitale,2)}€")
+                               text=f"📭 Nessun trade ora\nTrend: {trend}\nCapitale: {round(capitale,2)}€")
 
     await weekly_report()
 
