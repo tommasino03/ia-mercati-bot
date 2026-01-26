@@ -4,7 +4,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from telegram import Bot
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ======================
 # CONFIG
@@ -29,7 +29,7 @@ TICKERS = [
 ]
 
 # ======================
-# UTILS ULTRA-SICURE
+# UTILS ROBUSTI
 # ======================
 def safe_last(x):
     try:
@@ -67,7 +67,7 @@ def save_trade(trade):
     df.to_csv(TRADES_FILE, index=False)
 
 # ======================
-# MARKET TREND (ROBUSTO)
+# TREND MERCATO
 # ======================
 def market_trend():
     df = yf.download("^GSPC", period="1y", interval="1d", progress=False)
@@ -75,13 +75,11 @@ def market_trend():
         return "NEUTRAL"
 
     close = df["Close"]
-
     ma50 = safe_last(close.rolling(50).mean())
     ma200 = safe_last(close.rolling(200).mean())
 
     if ma50 is None or ma200 is None:
         return "NEUTRAL"
-
     if ma50 > ma200:
         return "UP"
     elif ma50 < ma200:
@@ -89,61 +87,60 @@ def market_trend():
     return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLI (MOVER)
+# ANALISI TITOLO NEXT LEVEL
 # ======================
-def analyze(ticker, trend, capitale):
+def analyze_ticker(ticker, trend, capitale):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
     if df.empty or len(df) < 30:
         return None
 
+    df = df.dropna()
     close = df["Close"]
     high = df["High"]
     low = df["Low"]
     volume = df["Volume"]
 
     price = safe_last(close)
-    prev = safe_last(close.iloc[:-1])
-
+    prev = safe_last(close.shift(1))
     if price is None or prev is None:
         return None
 
     daily_change = ((price - prev) / prev) * 100
 
-    # 🔥 Filtro mover reali (come eToro)
-    if daily_change < 5:
-        return None
-
-    rsi_val = safe_last(rsi(close))
-    ma20 = safe_last(close.rolling(20).mean())
-    ma50 = safe_last(close.rolling(50).mean())
-    vol_now = safe_last(volume)
+    # Filtro movers reali
     vol_avg = safe_last(volume.rolling(20).mean())
-
-    if None in [rsi_val, ma20, ma50, vol_now, vol_avg]:
+    vol_now = safe_last(volume)
+    if vol_avg is None or vol_now is None:
         return None
-
     if vol_now < vol_avg * 1.5:
         return None
+    if daily_change < 3:
+        return None
 
+    # Solo trend positivo
     if trend != "UP":
         return None
 
-    if not (price > ma20 > ma50):
-        return None
-
+    # Indicatori tecnici
+    rsi_val = safe_last(rsi(close))
+    ma20 = safe_last(close.rolling(20).mean())
+    ma50 = safe_last(close.rolling(50).mean())
     atr = safe_last((high - low).rolling(14).mean())
-    if atr is None or atr <= 0:
+    if None in [rsi_val, ma20, ma50, atr] or atr <= 0:
+        return None
+    if not (price > ma20 > ma50) or rsi_val > 60:
         return None
 
+    # Calcolo size
     risk = capitale * RISK_PER_TRADE
     stop = price - atr
     size = max(1, int(risk / (price - stop)))
 
     return {
         "ticker": ticker,
-        "entry": round(price, 2),
-        "stop": round(stop, 2),
-        "target": round(price + atr * RISK_REWARD, 2),
+        "entry": round(price,2),
+        "stop": round(stop,2),
+        "target": round(price + atr * RISK_REWARD,2),
         "size": size,
         "date": datetime.utcnow().strftime("%Y-%m-%d"),
         "status": "OPEN",
@@ -151,60 +148,55 @@ def analyze(ticker, trend, capitale):
     }
 
 # ======================
-# CHECK TRADES
+# TRACCIAMENTO AUTOMATICO
 # ======================
-async def check_open_trades():
+async def check_trades():
     df = load_trades()
     capitale = CAPITALE_INIZIALE
-
     if df.empty:
         return capitale
 
     for i, row in df.iterrows():
         if row["status"] != "OPEN":
-            capitale += row.get("pnl", 0)
+            capitale += row.get("pnl",0)
             continue
 
         data = yf.download(row["ticker"], period="5d", interval="1d", progress=False)
         if data.empty:
             continue
-
         price = safe_last(data["Close"])
         if price is None:
             continue
 
         pnl = 0
-
         if price >= row["target"]:
-            pnl = (row["target"] - row["entry"]) * row["size"]
-            df.loc[i, "status"] = "WIN"
-
+            pnl = (row["target"] - row["entry"])*row["size"]
+            df.loc[i,"status"] = "WIN"
         elif price <= row["stop"]:
-            pnl = (row["stop"] - row["entry"]) * row["size"]
-            df.loc[i, "status"] = "LOSS"
+            pnl = (row["stop"] - row["entry"])*row["size"]
+            df.loc[i,"status"] = "LOSS"
 
         if pnl != 0:
-            df.loc[i, "exit_price"] = price
-            df.loc[i, "pnl"] = round(pnl, 2)
+            df.loc[i,"exit_price"] = price
+            df.loc[i,"pnl"] = round(pnl,2)
             await bot.send_message(
                 chat_id=CHAT_ID,
                 text=f"🔔 CHIUSURA {row['ticker']}\nRisultato: {df.loc[i,'status']}\nPNL: {round(pnl,2)}€"
             )
 
-    df.to_csv(TRADES_FILE, index=False)
+    df.to_csv(TRADES_FILE,index=False)
     return capitale
 
 # ======================
 # MAIN
 # ======================
 async def main():
-    capitale = await check_open_trades()
+    capitale = await check_trades()
     trend = market_trend()
-
     nuovi = []
 
     for t in TICKERS:
-        trade = analyze(t, trend, capitale)
+        trade = analyze_ticker(t, trend, capitale)
         if trade:
             save_trade(trade)
             nuovi.append(trade)
@@ -217,7 +209,6 @@ async def main():
         return
 
     msg = f"🚀 NUOVI TRADE (Paper)\nTrend: {trend}\nCapitale: {round(capitale,2)}€\n\n"
-
     for t in nuovi:
         msg += (
             f"📌 {t['ticker']}\n"
@@ -227,7 +218,6 @@ async def main():
             f"Target: {t['target']}\n"
             f"Size: {t['size']}\n\n"
         )
-
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
 if __name__ == "__main__":
