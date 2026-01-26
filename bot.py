@@ -28,8 +28,8 @@ TICKERS = [
     "SNAP","PYPL","ROKU","MARA","RIOT"
 ]
 
-INTERVAL_INTRADAY = "15m"
-LOOKBACK_INTRADAY = "10d"
+INTERVAL_INTRADAY = "1m"  # monitoraggio ogni minuto
+LOOKBACK_INTRADAY = "5d"  # ultimi 5 giorni per volatilità e breakout
 
 # ======================
 # UTILS ROBUSTI
@@ -84,9 +84,9 @@ def market_trend():
     return "UP" if ma50 > ma200 else "DOWN"
 
 # ======================
-# SCANSIONE PRE-MARKET (FIXED)
+# PRE-MARKET / TOP MOVERS
 # ======================
-def premarket_movers():
+def top_movers():
     movers = []
     for t in TICKERS:
         df = yf.download(t, period="2d", interval="1d", progress=False)
@@ -103,7 +103,7 @@ def premarket_movers():
     return movers[:5]
 
 # ======================
-# ANALISI TITOLO INTRADAY
+# ANALISI INTRADAY PER TRADE
 # ======================
 def analyze_ticker(ticker, trend, capitale):
     df = yf.download(ticker, period=LOOKBACK_INTRADAY, interval=INTERVAL_INTRADAY, progress=False)
@@ -152,11 +152,11 @@ def analyze_ticker(ticker, trend, capitale):
         "date": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
         "status": "OPEN",
         "trail": stop,
-        "reason": f"Intraday Breakout + volume | +{round(daily_change,1)}% | RSI {round(rsi_val,1)}"
+        "reason": f"Breakout intraday + volume | +{round(daily_change,1)}% | RSI {round(rsi_val,1)}"
     }
 
 # ======================
-# TRACCIAMENTO + TRAILING STOP
+# TRACCIAMENTO TRADE + TRAILING STOP
 # ======================
 async def check_trades():
     df = load_trades()
@@ -202,65 +202,46 @@ async def check_trades():
     return capitale
 
 # ======================
-# REPORT SETTIMANALE
-# ======================
-async def weekly_report():
-    df = load_trades()
-    if df.empty:
-        return
-    last_week = datetime.utcnow() - timedelta(days=7)
-    df["date_dt"] = pd.to_datetime(df["date"])
-    week_df = df[df["date_dt"] >= last_week]
-    if week_df.empty:
-        return
-    pnl = week_df["pnl"].sum()
-    win_rate = len(week_df[week_df["status"]=="WIN"]) / max(1,len(week_df))
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        text=f"📊 REPORT SETTIMANALE\nPNL totale: {round(pnl,2)}€\nTrade: {len(week_df)}\nWin rate: {round(win_rate*100,1)}%"
-    )
-
-# ======================
-# MAIN
+# MAIN LOOP INTRADAY
 # ======================
 async def main():
-    capitale = await check_trades()
-    trend = market_trend()
+    while True:
+        capitale = await check_trades()
+        trend = market_trend()
+        nuovi = []
 
-    nuovi = []
+        # Top movers ogni minuto
+        movers = top_movers()
+        for t, change in movers:
+            trade = analyze_ticker(t, trend, capitale)
+            if trade:
+                save_trade(trade)
+                nuovi.append(trade)
 
-    # Scansione top movers pre-market
-    movers = premarket_movers()
-    for t, change in movers:
-        trade = analyze_ticker(t, trend, capitale)
-        if trade:
-            save_trade(trade)
-            nuovi.append(trade)
+        # Controllo normale intraday
+        for t in TICKERS:
+            trade = analyze_ticker(t, trend, capitale)
+            if trade and trade not in nuovi:
+                save_trade(trade)
+                nuovi.append(trade)
 
-    # Controllo intraday normale
-    for t in TICKERS:
-        trade = analyze_ticker(t, trend, capitale)
-        if trade and trade not in nuovi:
-            save_trade(trade)
-            nuovi.append(trade)
+        if nuovi:
+            msg = f"🚀 NUOVI TRADE (Paper)\nTrend: {trend}\nCapitale: {round(capitale,2)}€\n\n"
+            for t in nuovi:
+                msg += (
+                    f"📌 {t['ticker']}\n"
+                    f"Motivo: {t['reason']}\n"
+                    f"Entry: {t['entry']}\n"
+                    f"Stop: {t['stop']}\n"
+                    f"Target: {t['target']}\n"
+                    f"Size: {t['size']}\n\n"
+                )
+            await bot.send_message(chat_id=CHAT_ID, text=msg)
+        else:
+            await bot.send_message(chat_id=CHAT_ID,
+                                   text=f"📭 Nessun trade ora\nTrend: {trend}\nCapitale: {round(capitale,2)}€")
 
-    if nuovi:
-        msg = f"🚀 NUOVI TRADE (Paper)\nTrend: {trend}\nCapitale: {round(capitale,2)}€\n\n"
-        for t in nuovi:
-            msg += (
-                f"📌 {t['ticker']}\n"
-                f"Motivo: {t['reason']}\n"
-                f"Entry: {t['entry']}\n"
-                f"Stop: {t['stop']}\n"
-                f"Target: {t['target']}\n"
-                f"Size: {t['size']}\n\n"
-            )
-        await bot.send_message(chat_id=CHAT_ID, text=msg)
-    else:
-        await bot.send_message(chat_id=CHAT_ID,
-                               text=f"📭 Nessun trade ora\nTrend: {trend}\nCapitale: {round(capitale,2)}€")
-
-    await weekly_report()
+        await asyncio.sleep(60)  # check ogni 1 minuto
 
 if __name__ == "__main__":
     asyncio.run(main())
