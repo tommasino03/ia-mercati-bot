@@ -28,7 +28,7 @@ TICKERS = [
 ]
 
 # ======================
-# UTILS ROBUSTI (ANTI-CRASH)
+# UTILS ANTI-CRASH
 # ======================
 def scalar(x):
     if x is None:
@@ -81,7 +81,7 @@ def market_trend():
     return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLI
+# ANALISI TITOLO
 # ======================
 def analyze_ticker(ticker, trend):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
@@ -94,7 +94,14 @@ def analyze_ticker(ticker, trend):
     volume = df["Volume"]
 
     price = scalar(close)
-    if price is None:
+    prev_price = scalar(close.iloc[:-1])
+
+    if price is None or prev_price is None:
+        return None
+
+    daily_change = ((price - prev_price) / prev_price) * 100
+
+    if daily_change < 4:
         return None
 
     rsi_val = scalar(rsi(close))
@@ -106,11 +113,6 @@ def analyze_ticker(ticker, trend):
     if None in [rsi_val, ma20, ma50, vol_now, vol_avg]:
         return None
 
-    # mover giornaliero
-    daily_change = (price - close.iloc[-2]) / close.iloc[-2] * 100
-    if daily_change < 4:
-        return None
-
     if vol_now < vol_avg * 1.5:
         return None
 
@@ -118,14 +120,15 @@ def analyze_ticker(ticker, trend):
     confidence = 50
     reasons = []
 
-    if trend == "UP" and price > ma20 > ma50 and rsi_val < 60:
+    if trend == "UP" and price > ma20 > ma50 and rsi_val < 65:
         signal = "BUY"
-        confidence += 25
+        confidence += 30
         reasons = [
             "Trend mercato rialzista",
+            "Strong daily mover (>4%)",
             "Prezzo sopra MA20 e MA50",
-            "RSI non in ipercomprato",
-            "Volume superiore alla media"
+            "RSI sano (non ipercomprato)",
+            "Volume in espansione"
         ]
 
     if signal is None or confidence < MIN_CONFIDENCE:
@@ -140,7 +143,7 @@ def analyze_ticker(ticker, trend):
     target = entry + atr * RISK_REWARD
 
     risk_amount = CAPITALE * RISK_PER_TRADE
-    size = int(risk_amount / (entry - stop))
+    size = max(1, int(risk_amount / (entry - stop)))
 
     return {
         "ticker": ticker,
@@ -168,11 +171,11 @@ async def main():
     if not trades:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessuna azione oggi\nTrend mercato: {trend}\nCapitale: {CAPITALE}€"
+            text=f"📭 Nessuna azione oggi\nTrend: {trend}\nCapitale: {CAPITALE}€"
         )
         return
 
-    msg = f"📈 PAPER TRADING\nTrend: {trend}\nCapitale: {CAPITALE}€\n\n"
+    msg = f"📈 PAPER TRADING\nTrend mercato: {trend}\nCapitale: {CAPITALE}€\n\n"
 
     for t in sorted(trades, key=lambda x: x["confidence"], reverse=True)[:3]:
         msg += (
