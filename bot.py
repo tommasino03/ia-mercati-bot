@@ -12,7 +12,7 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 if not TOKEN or not CHAT_ID:
-    raise ValueError("❌ Token Telegram mancanti")
+    raise ValueError("Token Telegram mancanti")
 
 bot = Bot(token=TOKEN)
 
@@ -21,9 +21,9 @@ TICKERS = [
     "NVDA", "META", "AMD", "PLTR", "ROKU"
 ]
 
-RISK_REWARD = 2.0
-MIN_CONFIDENCE = 65  # %
-CAPITALE = 1000  # capitale iniziale per paper trading
+CAPITALE_INIZIALE = 1000
+RISK_REWARD = 2
+MIN_CONFIDENCE = 65
 
 # ======================
 # UTILS
@@ -33,11 +33,8 @@ def clean_df(df):
         df.columns = df.columns.get_level_values(0)
     return df.dropna()
 
-def last(x):
-    arr = np.array(x)
-    if len(arr.shape) > 1:  # se è DataFrame
-        return float(arr[-1, 0])
-    return float(arr[-1])
+def last(series):
+    return float(series.iloc[-1])
 
 def rsi(series, period=14):
     delta = series.diff()
@@ -53,12 +50,9 @@ def rsi(series, period=14):
 # ======================
 def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
-    if df.empty:
-        return "NEUTRAL"
-
     df = clean_df(df)
-    close = df["Close"].astype(float)
 
+    close = df["Close"]
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
 
@@ -69,7 +63,7 @@ def market_trend():
     return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLO + MOVERS + PAPER TRADING
+# ANALISI TITOLO
 # ======================
 def analyze(ticker, trend, capitale):
     df = yf.download(ticker, period="4mo", interval="1d", progress=False)
@@ -77,107 +71,108 @@ def analyze(ticker, trend, capitale):
         return None, capitale
 
     df = clean_df(df)
-    close = df["Close"].astype(float)
-    high = df["High"].astype(float)
-    low = df["Low"].astype(float)
-    volume = df["Volume"].astype(float)
-    open_price = df["Open"].astype(float)
 
-    rsi_val = last(rsi(close))
+    close = df["Close"]
+    open_p = df["Open"]
+    high = df["High"]
+    low = df["Low"]
+
     ma20 = close.rolling(20).mean()
     ma50 = close.rolling(50).mean()
-    atr_val = last((high - low).rolling(14).mean())
+    rsi_val = last(rsi(close))
+    atr = last((high - low).rolling(14).mean())
 
-    # ======================
-    # MOVERS GIORNALIERI
-    # ======================
-    daily_change_pct = (last(close) - last(open_price)) / last(open_price) * 100
-    is_mover = abs(daily_change_pct) >= 3  # soglia %
+    daily_change = (last(close) - last(open_p)) / last(open_p) * 100
+    is_mover = abs(daily_change) >= 3
 
+    reasons = []
     signal = None
     confidence = 0
 
-    # ======================
-    # LOGICA TRADE
-    # ======================
+    # ===== LOGICA BUY =====
     if trend == "UP":
-        if last(close) > last(ma20) > last(ma50) and rsi_val < 45:
+        if last(close) > last(ma20) > last(ma50):
+            reasons.append("Prezzo sopra MA20 e MA50 (trend rialzista)")
+        if rsi_val < 45:
+            reasons.append(f"RSI basso ({round(rsi_val,1)}) → pullback")
+        if len(reasons) >= 2:
             signal = "BUY"
             confidence = 70 + (45 - rsi_val)
-    elif trend == "DOWN":
-        if last(close) < last(ma20) < last(ma50) and rsi_val > 55:
+
+    # ===== LOGICA SELL =====
+    if trend == "DOWN":
+        if last(close) < last(ma20) < last(ma50):
+            reasons.append("Prezzo sotto MA20 e MA50 (trend ribassista)")
+        if rsi_val > 55:
+            reasons.append(f"RSI alto ({round(rsi_val,1)}) → eccesso")
+        if len(reasons) >= 2:
             signal = "SELL"
             confidence = 70 + (rsi_val - 55)
 
-    # Se non ci sono segnali classici ma il titolo è mover
+    # ===== MOVERS =====
     if not signal and is_mover:
-        signal = "BUY" if daily_change_pct > 0 else "SELL"
-        confidence = min(85, 50 + abs(daily_change_pct) * 5)
+        signal = "BUY" if daily_change > 0 else "SELL"
+        confidence = 75
+        reasons.append(f"Mover giornaliero {round(daily_change,2)}%")
 
     if not signal or confidence < MIN_CONFIDENCE:
         return None, capitale
 
     entry = last(close)
-    if signal == "BUY":
-        stop = entry - atr_val
-        target = entry + atr_val * RISK_REWARD
-    else:
-        stop = entry + atr_val
-        target = entry - atr_val * RISK_REWARD
-
-    # ======================
-    # PAPER TRADING
-    # ======================
-    # calcolo numero azioni da comprare in base al capitale disponibile
     qty = max(1, int(capitale / entry))
-    # aggiorno capitale ipotetico
+
+    if signal == "BUY":
+        stop = entry - atr
+        target = entry + atr * RISK_REWARD
+    else:
+        stop = entry + atr
+        target = entry - atr * RISK_REWARD
+
     capitale -= qty * entry
 
-    trade_info = {
+    return {
         "ticker": ticker,
         "signal": signal,
         "entry": round(entry, 2),
         "stop": round(stop, 2),
         "target": round(target, 2),
-        "confidence": round(min(confidence, 95), 1),
         "qty": qty,
-        "mover": is_mover
-    }
-
-    return trade_info, capitale
+        "confidence": round(min(confidence, 95), 1),
+        "reasons": reasons
+    }, capitale
 
 # ======================
 # MAIN
 # ======================
 async def main():
     trend = market_trend()
-    capitale = CAPITALE
-    results = []
+    capitale = CAPITALE_INIZIALE
+    trades = []
 
     for t in TICKERS:
-        r, capitale = analyze(t, trend, capitale)
-        if r:
-            results.append(r)
+        res, capitale = analyze(t, trend, capitale)
+        if res:
+            trades.append(res)
 
-    if not results:
+    if not trades:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessun trade valido oggi\nTrend mercato: {trend}\nCapitale residuo: {capitale:.2f}$"
+            text=f"Nessun trade oggi\nTrend: {trend}\nCapitale: {capitale}$"
         )
         return
 
-    msg = f"🚀 SEGNALI OPERATIVI (Paper trading)\nTrend mercato: {trend}\nCapitale iniziale: {CAPITALE}$\nCapitale residuo: {capitale:.2f}$\n\n"
+    msg = f"📊 PAPER TRADING\nTrend mercato: {trend}\n\n"
 
-    for r in sorted(results, key=lambda x: x["confidence"], reverse=True):
+    for t in trades:
         msg += (
-            f"📌 {r['ticker']} — {r['signal']}\n"
-            f"Entry: {r['entry']}$\n"
-            f"Stop: {r['stop']}$\n"
-            f"Target: {r['target']}$\n"
-            f"Quantità: {r['qty']}\n"
-            f"Confidenza: {r['confidence']}%\n"
-            f"Mover: {'✅' if r['mover'] else '❌'}\n\n"
+            f"📌 {t['ticker']} — {t['signal']}\n"
+            f"Entry: {t['entry']}$ | Stop: {t['stop']}$ | Target: {t['target']}$\n"
+            f"Qty: {t['qty']} | Confidenza: {t['confidence']}%\n"
+            f"Perché:\n"
         )
+        for r in t["reasons"]:
+            msg += f"• {r}\n"
+        msg += "\n"
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
