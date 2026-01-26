@@ -30,7 +30,6 @@ TICKERS = [
 
 INTERVAL_INTRADAY = "15m"
 LOOKBACK_INTRADAY = "10d"
-PREMARKET_HOURS = ("13:30", "15:30")  # UTC corrisponde 8:30-10:30 EST
 
 # ======================
 # UTILS ROBUSTI
@@ -85,7 +84,7 @@ def market_trend():
     return "UP" if ma50 > ma200 else "DOWN"
 
 # ======================
-# SCANSIONE PRE-MARKET
+# SCANSIONE PRE-MARKET (FIXED)
 # ======================
 def premarket_movers():
     movers = []
@@ -93,10 +92,15 @@ def premarket_movers():
         df = yf.download(t, period="2d", interval="1d", progress=False)
         if df.empty or len(df) < 2:
             continue
-        change = ((df["Close"].iloc[-1] - df["Close"].iloc[-2]) / df["Close"].iloc[-2]) * 100
+        try:
+            close_prev = float(df["Close"].iloc[-2])
+            close_now = float(df["Close"].iloc[-1])
+        except:
+            continue
+        change = ((close_now - close_prev) / close_prev) * 100
         movers.append((t, change))
     movers.sort(key=lambda x: abs(x[1]), reverse=True)
-    return movers[:5]  # top 5 movers
+    return movers[:5]
 
 # ======================
 # ANALISI TITOLO INTRADAY
