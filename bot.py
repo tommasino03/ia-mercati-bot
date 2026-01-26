@@ -4,6 +4,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from telegram import Bot
+from datetime import datetime
 
 # ======================
 # CONFIG
@@ -16,10 +17,11 @@ if not TOKEN or not CHAT_ID:
 
 bot = Bot(token=TOKEN)
 
-CAPITALE = 1000
+CAPITALE_INIZIALE = 1000
 RISK_PER_TRADE = 0.02
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 60
+TRADES_FILE = "trades.csv"
 
 TICKERS = [
     "AAPL","MSFT","NVDA","AMD","META","AMZN","TSLA",
@@ -28,11 +30,9 @@ TICKERS = [
 ]
 
 # ======================
-# UTILS ANTI-CRASH
+# UTILS SICURE
 # ======================
 def scalar(x):
-    if x is None:
-        return None
     if isinstance(x, pd.DataFrame):
         x = x.iloc[:, 0]
     if isinstance(x, pd.Series):
@@ -46,8 +46,6 @@ def scalar(x):
         return None
 
 def rsi(series, period=14):
-    if isinstance(series, pd.DataFrame):
-        series = series.iloc[:, 0]
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -57,7 +55,20 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ======================
-# TREND MERCATO
+# STORAGE
+# ======================
+def load_trades():
+    if not os.path.exists(TRADES_FILE):
+        return pd.DataFrame()
+    return pd.read_csv(TRADES_FILE)
+
+def save_trade(trade):
+    df = load_trades()
+    df = pd.concat([df, pd.DataFrame([trade])], ignore_index=True)
+    df.to_csv(TRADES_FILE, index=False)
+
+# ======================
+# MERCATO
 # ======================
 def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
@@ -65,25 +76,19 @@ def market_trend():
         return "NEUTRAL"
 
     close = df["Close"]
-    ma50 = close.rolling(50).mean()
-    ma200 = close.rolling(200).mean()
+    ma50 = scalar(close.rolling(50).mean())
+    ma200 = scalar(close.rolling(200).mean())
 
-    v50 = scalar(ma50)
-    v200 = scalar(ma200)
-
-    if v50 is None or v200 is None:
-        return "NEUTRAL"
-
-    if v50 > v200:
+    if ma50 > ma200:
         return "UP"
-    elif v50 < v200:
+    elif ma50 < ma200:
         return "DOWN"
     return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLO
+# ANALISI
 # ======================
-def analyze_ticker(ticker, trend):
+def analyze(ticker, trend, capitale):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
     if df.empty or len(df) < 50:
         return None
@@ -94,14 +99,13 @@ def analyze_ticker(ticker, trend):
     volume = df["Volume"]
 
     price = scalar(close)
-    prev_price = scalar(close.iloc[:-1])
+    prev = scalar(close.iloc[:-1])
 
-    if price is None or prev_price is None:
+    if price is None or prev is None:
         return None
 
-    daily_change = ((price - prev_price) / prev_price) * 100
-
-    if daily_change < 4:
+    daily_move = ((price - prev) / prev) * 100
+    if daily_move < 4:
         return None
 
     rsi_val = scalar(rsi(close))
@@ -116,80 +120,100 @@ def analyze_ticker(ticker, trend):
     if vol_now < vol_avg * 1.5:
         return None
 
-    signal = None
-    confidence = 50
-    reasons = []
-
-    if trend == "UP" and price > ma20 > ma50 and rsi_val < 65:
-        signal = "BUY"
-        confidence += 30
-        reasons = [
-            "Trend mercato rialzista",
-            "Strong daily mover (>4%)",
-            "Prezzo sopra MA20 e MA50",
-            "RSI sano (non ipercomprato)",
-            "Volume in espansione"
-        ]
-
-    if signal is None or confidence < MIN_CONFIDENCE:
+    if trend != "UP" or not (price > ma20 > ma50):
         return None
 
     atr = scalar((high - low).rolling(14).mean())
     if atr is None:
         return None
 
-    entry = price
-    stop = entry - atr
-    target = entry + atr * RISK_REWARD
-
-    risk_amount = CAPITALE * RISK_PER_TRADE
-    size = max(1, int(risk_amount / (entry - stop)))
+    risk = capitale * RISK_PER_TRADE
+    stop = price - atr
+    size = max(1, int(risk / (price - stop)))
 
     return {
         "ticker": ticker,
-        "signal": signal,
-        "entry": round(entry, 2),
+        "entry": round(price, 2),
         "stop": round(stop, 2),
-        "target": round(target, 2),
+        "target": round(price + atr * RISK_REWARD, 2),
         "size": size,
-        "confidence": min(confidence, 90),
-        "reasons": reasons
+        "date": datetime.utcnow().strftime("%Y-%m-%d"),
+        "status": "OPEN"
     }
+
+# ======================
+# CHECK TRADE APERTI
+# ======================
+async def check_open_trades():
+    df = load_trades()
+    if df.empty:
+        return CAPITALE_INIZIALE
+
+    capitale = CAPITALE_INIZIALE
+
+    for i, row in df.iterrows():
+        if row["status"] != "OPEN":
+            capitale += row["pnl"]
+            continue
+
+        df_price = yf.download(row["ticker"], period="5d", interval="1d", progress=False)
+        if df_price.empty:
+            continue
+
+        price = scalar(df_price["Close"])
+        pnl = 0
+
+        if price >= row["target"]:
+            pnl = (row["target"] - row["entry"]) * row["size"]
+            df.loc[i, "status"] = "WIN"
+
+        elif price <= row["stop"]:
+            pnl = (row["stop"] - row["entry"]) * row["size"]
+            df.loc[i, "status"] = "LOSS"
+
+        if pnl != 0:
+            df.loc[i, "exit_price"] = price
+            df.loc[i, "pnl"] = round(pnl, 2)
+            await bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"🔔 TRADE CHIUSO {row['ticker']}\nRisultato: {df.loc[i,'status']}\nPNL: {round(pnl,2)}€"
+            )
+
+    df.to_csv(TRADES_FILE, index=False)
+    return capitale
 
 # ======================
 # MAIN
 # ======================
 async def main():
+    capitale = await check_open_trades()
     trend = market_trend()
-    trades = []
+
+    trades_today = []
 
     for t in TICKERS:
-        res = analyze_ticker(t, trend)
-        if res:
-            trades.append(res)
+        trade = analyze(t, trend, capitale)
+        if trade:
+            save_trade(trade)
+            trades_today.append(trade)
 
-    if not trades:
+    if not trades_today:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"📭 Nessuna azione oggi\nTrend: {trend}\nCapitale: {CAPITALE}€"
+            text=f"📭 Nessuna nuova operazione\nTrend: {trend}\nCapitale: {round(capitale,2)}€"
         )
         return
 
-    msg = f"📈 PAPER TRADING\nTrend mercato: {trend}\nCapitale: {CAPITALE}€\n\n"
+    msg = f"📈 NUOVI TRADE (Paper)\nTrend: {trend}\nCapitale: {round(capitale,2)}€\n\n"
 
-    for t in sorted(trades, key=lambda x: x["confidence"], reverse=True)[:3]:
+    for t in trades_today:
         msg += (
-            f"📌 {t['ticker']} — {t['signal']}\n"
+            f"📌 {t['ticker']}\n"
             f"Entry: {t['entry']}\n"
             f"Stop: {t['stop']}\n"
             f"Target: {t['target']}\n"
-            f"Size: {t['size']} azioni\n"
-            f"Confidenza: {t['confidence']}%\n"
-            f"Motivi:\n"
+            f"Size: {t['size']}\n\n"
         )
-        for r in t["reasons"]:
-            msg += f"• {r}\n"
-        msg += "\n"
 
     await bot.send_message(chat_id=CHAT_ID, text=msg)
 
