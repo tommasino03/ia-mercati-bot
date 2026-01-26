@@ -16,12 +16,11 @@ if not TOKEN or not CHAT_ID:
 
 bot = Bot(token=TOKEN)
 
-CAPITALE = 1000  # paper trading
-RISK_PER_TRADE = 0.02  # 2%
+CAPITALE = 1000
+RISK_PER_TRADE = 0.02
 RISK_REWARD = 2.0
 MIN_CONFIDENCE = 60
 
-# Universo titoli (liquidi + volatili)
 TICKERS = [
     "AAPL","MSFT","NVDA","AMD","META","AMZN","TSLA",
     "PLTR","COIN","RIVN","SOFI","AFRM","SHOP","UBER",
@@ -29,15 +28,26 @@ TICKERS = [
 ]
 
 # ======================
-# UTILS SICURE
+# UTILS ROBUSTI (ANTI-CRASH)
 # ======================
-def last(series):
-    s = series.dropna()
-    if len(s) == 0:
+def scalar(x):
+    if x is None:
         return None
-    return float(s.iloc[-1])
+    if isinstance(x, pd.DataFrame):
+        x = x.iloc[:, 0]
+    if isinstance(x, pd.Series):
+        x = x.dropna()
+        if len(x) == 0:
+            return None
+        return float(x.iloc[-1])
+    try:
+        return float(x)
+    except:
+        return None
 
 def rsi(series, period=14):
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -47,7 +57,7 @@ def rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ======================
-# TREND MERCATO (S&P500)
+# TREND MERCATO
 # ======================
 def market_trend():
     df = yf.download("^GSPC", period="6mo", interval="1d", progress=False)
@@ -58,76 +68,79 @@ def market_trend():
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
 
-    if last(ma50) > last(ma200):
+    v50 = scalar(ma50)
+    v200 = scalar(ma200)
+
+    if v50 is None or v200 is None:
+        return "NEUTRAL"
+
+    if v50 > v200:
         return "UP"
-    elif last(ma50) < last(ma200):
+    elif v50 < v200:
         return "DOWN"
     return "NEUTRAL"
 
 # ======================
-# ANALISI TITOLI (MOVER LOGICO)
+# ANALISI TITOLI
 # ======================
-def analyze_ticker(ticker, market_trend):
+def analyze_ticker(ticker, trend):
     df = yf.download(ticker, period="3mo", interval="1d", progress=False)
     if df.empty or len(df) < 50:
         return None
 
     close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
     volume = df["Volume"]
 
-    ma20 = close.rolling(20).mean()
-    ma50 = close.rolling(50).mean()
-    rsi_val = last(rsi(close))
-    vol_now = last(volume)
-    vol_avg = last(volume.rolling(20).mean())
-
-    if None in [rsi_val, vol_now, vol_avg]:
+    price = scalar(close)
+    if price is None:
         return None
 
-    price = last(close)
+    rsi_val = scalar(rsi(close))
+    ma20 = scalar(close.rolling(20).mean())
+    ma50 = scalar(close.rolling(50).mean())
+    vol_now = scalar(volume)
+    vol_avg = scalar(volume.rolling(20).mean())
 
-    # ======================
-    # FILTRO MOVER
-    # ======================
+    if None in [rsi_val, ma20, ma50, vol_now, vol_avg]:
+        return None
+
+    # mover giornaliero
     daily_change = (price - close.iloc[-2]) / close.iloc[-2] * 100
-
     if daily_change < 4:
         return None
 
     if vol_now < vol_avg * 1.5:
         return None
 
-    # ======================
-    # LOGICA TRADE
-    # ======================
     signal = None
-    reason = []
     confidence = 50
+    reasons = []
 
-    if market_trend == "UP" and price > last(ma20) > last(ma50) and rsi_val < 60:
+    if trend == "UP" and price > ma20 > ma50 and rsi_val < 60:
         signal = "BUY"
-        confidence += 20
-        reason.append("Trend mercato rialzista")
-        reason.append("Prezzo sopra MA20 e MA50")
-        reason.append("RSI non in ipercomprato")
+        confidence += 25
+        reasons = [
+            "Trend mercato rialzista",
+            "Prezzo sopra MA20 e MA50",
+            "RSI non in ipercomprato",
+            "Volume superiore alla media"
+        ]
 
-    if not signal:
+    if signal is None or confidence < MIN_CONFIDENCE:
         return None
 
-    # ======================
-    # RISK MANAGEMENT
-    # ======================
-    atr = (df["High"] - df["Low"]).rolling(14).mean()
-    atr_val = last(atr)
-    if atr_val is None:
+    atr = scalar((high - low).rolling(14).mean())
+    if atr is None:
         return None
 
     entry = price
-    stop = entry - atr_val
-    target = entry + atr_val * RISK_REWARD
+    stop = entry - atr
+    target = entry + atr * RISK_REWARD
 
     risk_amount = CAPITALE * RISK_PER_TRADE
-    position_size = risk_amount / (entry - stop)
+    size = int(risk_amount / (entry - stop))
 
     return {
         "ticker": ticker,
@@ -135,9 +148,9 @@ def analyze_ticker(ticker, market_trend):
         "entry": round(entry, 2),
         "stop": round(stop, 2),
         "target": round(target, 2),
-        "size": int(position_size),
+        "size": size,
         "confidence": min(confidence, 90),
-        "reason": reason
+        "reasons": reasons
     }
 
 # ======================
@@ -149,7 +162,7 @@ async def main():
 
     for t in TICKERS:
         res = analyze_ticker(t, trend)
-        if res and res["confidence"] >= MIN_CONFIDENCE:
+        if res:
             trades.append(res)
 
     if not trades:
@@ -159,7 +172,7 @@ async def main():
         )
         return
 
-    msg = f"📊 PAPER TRADING — SEGNALI\nTrend mercato: {trend}\nCapitale: {CAPITALE}€\n\n"
+    msg = f"📈 PAPER TRADING\nTrend: {trend}\nCapitale: {CAPITALE}€\n\n"
 
     for t in sorted(trades, key=lambda x: x["confidence"], reverse=True)[:3]:
         msg += (
@@ -169,9 +182,9 @@ async def main():
             f"Target: {t['target']}\n"
             f"Size: {t['size']} azioni\n"
             f"Confidenza: {t['confidence']}%\n"
-            f"Perché:\n"
+            f"Motivi:\n"
         )
-        for r in t["reason"]:
+        for r in t["reasons"]:
             msg += f"• {r}\n"
         msg += "\n"
 
